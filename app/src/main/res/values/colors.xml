@@ -1,0 +1,11 @@
+<resources>
+    <color name="primary_navy">#012169</color>
+    <color name="secondary_skyblue">#15BEF0</color>
+    <color name="emerald_deal">#10B981</color>
+    <color name="emerald_deal_dark">#059669</color>
+    <color name="background_light">#F8FAFC</color>
+    <color name="surface_light">#FFFFFF</color>
+    <color name="text_primary">#0F172A</color>
+    <color name="text_secondary">#64748B</color>
+    <color name="out_of_stock_red">#EF4444</color>
+</resources>

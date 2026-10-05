@@ -1,0 +1,15 @@
+<!-- Shopping bag carrying a two-tone capsule. Nudged up 2 units: the bag spans y 29.75-80.5, so this evens the top and bottom margins
+     with a slight lift for the heavier body. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <group android:translateY="-2">
+        <path android:strokeColor="#FFFFFFFF" android:strokeWidth="4.5" android:strokeLineCap="round"
+            android:pathData="M45,46 V41 a9,9 0 0 1 18,0 V46" />
+        <path android:fillColor="#FFFFFFFF"
+            android:pathData="M38,44 h32 a4,4 0 0 1 4,4 l2,26 a6,6 0 0 1 -6,6.5 h-32 a6,6 0 0 1 -6,-6.5 l2,-26 a4,4 0 0 1 4,-4 z" />
+        <group android:pivotX="54" android:pivotY="62" android:rotation="-45">
+            <path android:fillColor="#FF10B981" android:pathData="M53.3,56 H48 A6,6 0 0 0 48,68 H53.3 Z" />
+            <path android:fillColor="#FF15BEF0" android:pathData="M54.7,56 H60 A6,6 0 0 1 60,68 H54.7 Z" />
+        </group>
+    </group>
+</vector>

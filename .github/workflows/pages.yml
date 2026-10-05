@@ -1,0 +1,64 @@
+# Publishes the web app to GitHub Pages. The deals list lives on its own `deals` branch (one
+# commit, force-updated by the phone), so a new list redeploys the site without touching main.
+name: Pages
+
+on:
+  push:
+    branches: [main, deals]
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deploy at a time; a newer list waits for the current one rather than cancelling it.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - id: pages
+        uses: actions/configure-pages@v5
+
+      - name: Build site
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE: ${{ steps.pages.outputs.base_url }}
+        run: |
+          set -euo pipefail
+          PUBLIC_URL="$BASE" node web/scripts/build-userscript.mjs
+          mkdir -p _site
+          cp -r web/public/. _site/
+          # Link previews need absolute URLs (the local server fills these in per request).
+          find _site -name '*.html' -exec sed -i "s|{{BASE}}|$BASE|g" {} +
+          mkdir -p _site/api _site/downloads
+          if git fetch --depth=1 origin deals 2>/dev/null; then
+            git show FETCH_HEAD:snapshot.json > _site/api/snapshot
+          fi
+          git archive --format=zip --prefix=VS-Clearance/ -o _site/downloads/VS-Clearance-project.zip HEAD
+          gh release download --repo "$GITHUB_REPOSITORY" --pattern 'VS-Clearance.apk' --dir _site/downloads || true
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - id: deployment
+        uses: actions/deploy-pages@v4

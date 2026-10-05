@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>VS Clearance — live Vitamin Shoppe clearance deals</title>
+  <meta name="description" content="Live Vitamin Shoppe clearance deals with real cart prices, shelf stock and an AI review prompt.">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="VS Clearance — live Vitamin Shoppe clearance deals">
+  <meta property="og:description" content="Every clearance deal with the real “in cart” price, cost per serving and shelf stock. Tap to browse; get your own copy free.">
+  <meta property="og:image" content="{{BASE}}/icons/icon-512.png">
+  <meta property="og:url" content="{{BASE}}/">
+  <meta name="twitter:card" content="summary">
+  <meta name="theme-color" content="#012169">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="VS Clearance">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="top">
+    <div class="top-row">
+      <div>
+        <h1>Clearance Deals</h1>
+        <p id="subtitle" class="subtitle">Loading…</p>
+      </div>
+      <a class="get-btn" href="get/"><span>Get <span class="wide-only">the </span>app</span></a>
+      <button id="refresh" class="icon-btn on-dark" type="button" aria-label="Check for newer deals">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.65 6.35A7.95 7.95 0 0 0 12 4a8 8 0 1 0 7.73 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4z"/></svg>
+      </button>
+    </div>
+    <label class="search">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14"/></svg>
+      <input id="q" type="search" placeholder="Search brand or product" autocomplete="off" aria-label="Search deals">
+      <button id="q-clear" class="icon-btn small on-dark" type="button" aria-label="Clear search" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+      </button>
+    </label>
+  </header>
+
+  <div id="intro" class="banner info" hidden>
+    <span id="intro-text"><b>Clearance deals, shared with you.</b> Browse here, or <a href="get/">get the free app</a> for your store’s shelf stock.</span>
+    <button id="intro-dismiss" class="text-btn" type="button">Got it</button>
+  </div>
+  <div id="install-hint" class="banner info" hidden>
+    <span>Keep these deals one tap away: tap <b>Share</b> then <b>Add to Home Screen</b>.</span>
+    <button id="install-dismiss" class="text-btn" type="button">Got it</button>
+  </div>
+  <div id="banner" class="banner warn" hidden></div>
+
+  <main id="main">
+    <section class="controls" id="controls" hidden>
+      <div class="segmented" id="fulfil" role="radiogroup" aria-label="Fulfillment">
+        <button type="button" role="radio" data-mode="ship">Ship</button>
+        <button type="button" role="radio" data-mode="pickup">Pick up</button>
+      </div>
+      <p id="store-line" class="store-line" hidden></p>
+      <div class="chips" id="floor-chips" role="group" aria-label="Filters"></div>
+      <div class="chips" id="cat-chips" role="group" aria-label="Categories"></div>
+    </section>
+
+    <div class="summary" id="summary" hidden>
+      <span id="count" class="count" aria-live="polite" tabindex="-1"></span>
+      <button id="to-search" class="icon-btn small" type="button" aria-label="Search deals">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14"/></svg>
+      </button>
+      <button id="ask-ai" class="tonal-btn" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a7 7 0 0 0-4 12.74V17a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-2.26A7 7 0 0 0 12 2m-3 19a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1v-1H9z"/></svg>
+        <span id="ask-ai-label">Ask AI</span>
+      </button>
+      <label class="sort">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 17.01V10h-2v7.01h-3L15 21l4-3.99zM9 3 5 6.99h3V14h2V6.99h3z"/></svg>
+        <span class="visually-hidden">Sort by</span>
+        <select id="sort"></select>
+      </label>
+    </div>
+
+    <ul id="list" class="list" aria-label="Deals"></ul>
+    <div id="status" class="status" hidden></div>
+  </main>
+
+  <dialog id="prompt-dialog" aria-labelledby="prompt-title">
+    <form method="dialog" class="sheet">
+      <div class="sheet-head">
+        <h2 id="prompt-title">Ask an AI which deals are worth it</h2>
+        <button class="icon-btn" value="close" aria-label="Close">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </div>
+      <p class="muted">Paste into ChatGPT, Claude, Gemini or similar. It asks for an evidence score, absorption rating, value per dose and a BUY / CONSIDER / PASS verdict for each item.</p>
+      <div class="scope" id="prompt-scope"></div>
+      <div class="sheet-actions">
+        <button type="button" id="copy-prompt" class="primary-btn">Copy prompt</button>
+        <button type="button" id="share-prompt" class="tonal-btn wide">Share</button>
+      </div>
+      <p id="copy-note" class="copy-note" role="status" aria-live="polite"></p>
+      <p id="ai-links" class="ai-links" hidden>
+        <a href="https://chatgpt.com/" target="_blank" rel="noopener">ChatGPT</a>
+        <a href="https://claude.ai/new" target="_blank" rel="noopener">Claude</a>
+        <a href="https://gemini.google.com/app" target="_blank" rel="noopener">Gemini</a>
+      </p>
+      <details id="prompt-details">
+        <summary>Show prompt</summary>
+        <pre id="prompt-text"></pre>
+      </details>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+  <footer class="foot-note">
+    Not affiliated with The Vitamin Shoppe · “in cart” prices are estimates ·
+    <a href="get/#source">Free &amp; open source</a>
+  </footer>
+
+  <noscript><p style="padding:24px">Turn on JavaScript to see the deals, or <a href="get/">get the app</a>.</p></noscript>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

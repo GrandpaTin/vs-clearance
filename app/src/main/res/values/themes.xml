@@ -1,0 +1,6 @@
+<resources>
+    <style name="Theme.VitaminShoppeDeals" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">@color/primary_navy</item>
+        <item name="android:navigationBarColor">@color/surface_light</item>
+    </style>
+</resources>

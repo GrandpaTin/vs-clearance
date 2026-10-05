@@ -1,0 +1,13 @@
+{
+  "name": "vs-clearance-web",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Web/iPhone companion for the VS Clearance Android app: shows the deals the phone publishes.",
+  "type": "module",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test \"tests/*.test.mjs\"",
+    "icons": "node scripts/make-icons.mjs"
+  }
+}

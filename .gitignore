@@ -1,0 +1,13 @@
+.gradle/
+build/
+app/build/
+local.properties
+*.apk
+.idea/
+*.iml
+
+# web
+web/data/
+web/node_modules/
+web/build/
+web/public/downloads/

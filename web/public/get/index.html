@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>VS Clearance — Vitamin Shoppe deal finder</title>
+  <meta name="description" content="Every Vitamin Shoppe clearance deal with real cart prices, your store's shelf stock and an AI review prompt — on iPhone, PC or Android.">
+  <meta name="theme-color" content="#012169">
+  <meta property="og:title" content="VS Clearance — Vitamin Shoppe deal finder">
+  <meta property="og:description" content="Real cart prices, shelf stock at your store, filters and an AI review prompt. Free; works on iPhone, PC and Android.">
+  <meta property="og:image" content="{{BASE}}/icons/icon-512.png">
+  <meta property="og:url" content="{{BASE}}/get/">
+  <meta property="og:type" content="website">
+  <meta name="twitter:card" content="summary">
+  <link rel="icon" href="../icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="../icons/apple-touch-icon.png">
+  <style>
+    :root { --navy:#012169; --sky:#15BEF0; --bg:#F8FAFC; --surface:#fff; --s2:#F1F5F9; --text:#0F172A; --muted:#64748B; --line:#E2E8F0; --green:#047857; --skybg:#E0F2FE; --skyfg:#0369A1; color-scheme: light; }
+    @media (prefers-color-scheme: dark) { :root { --bg:#0B1120; --surface:#111827; --s2:#1E293B; --text:#F8FAFC; --muted:#94A3B8; --line:#1F2A3C; --green:#34D399; --skybg:#0C4A6E; --skyfg:#BAE6FD; color-scheme: dark; } }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 17px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    a { color: inherit; }
+    .hero { background: linear-gradient(160deg, #012169, #001540); color: #fff; padding: calc(env(safe-area-inset-top) + 36px) 20px 32px; text-align: center; }
+    .hero img { width: 88px; height: 88px; border-radius: 22px; box-shadow: 0 10px 30px rgba(0,0,0,.35); }
+    .hero h1 { margin: 16px 0 4px; font-size: 1.9rem; }
+    .hero p { margin: 0 auto; max-width: 560px; opacity: .9; }
+    .features { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 18px auto 0; max-width: 780px; padding: 0; list-style: none; }
+    .features li { background: rgba(255,255,255,.12); border-radius: 999px; padding: 6px 12px; font-size: .9rem; }
+    main { max-width: 720px; margin: 0 auto; padding: 8px 16px 48px; }
+    .card { background: var(--surface); border: 1px solid var(--line); border-radius: 18px; padding: 20px; margin-top: 16px; }
+    .card.highlight { border: 2px solid var(--sky); }
+    .card h2 { margin: 0 0 4px; font-size: 1.25rem; display: flex; align-items: center; gap: 10px; }
+    .card .sub { margin: 0 0 12px; color: var(--muted); }
+    .badge { font-size: .75rem; background: var(--skybg); color: var(--skyfg); border-radius: 999px; padding: 2px 10px; font-weight: 700; }
+    ol { margin: 0; padding-left: 22px; }
+    ol li { margin: 10px 0; }
+    .btn { display: inline-flex; align-items: center; justify-content: center; text-align: center; gap: 8px; min-height: 48px; padding: 0 20px; border-radius: 999px; font-weight: 700; text-decoration: none; border: 0; cursor: pointer; font-size: 1rem; }
+    .btn.primary { background: var(--navy); color: #fff; }
+    @media (prefers-color-scheme: dark) { .btn.primary { background: var(--sky); color: #001540; } }
+    .btn.tonal { background: var(--skybg); color: var(--skyfg); }
+    .row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; }
+    .note { color: var(--muted); font-size: .92rem; }
+    .share { display: flex; gap: 8px; align-items: center; background: var(--s2); border-radius: 14px; padding: 8px 8px 8px 14px; }
+    ul.note { padding-left: 20px; margin: 0; }
+    ul.note li { margin: 6px 0; }
+    code { font-size: .9em; }
+    .share code { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .95rem; }
+    details { margin-top: 10px; }
+    summary { cursor: pointer; font-weight: 700; min-height: 44px; display: flex; align-items: baseline; padding-top: 10px; gap: 6px; list-style: none; color: var(--skyfg); }
+    @media (prefers-color-scheme: light) { summary { color: var(--navy); } }
+    summary::-webkit-details-marker { display: none; }
+    summary::before { content: "▸"; transition: transform .15s; }
+    details[open] summary::before { transform: rotate(90deg); }
+    .back { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; color: #fff; font-weight: 700; text-decoration: none; opacity: .9; position: absolute; left: max(12px, calc(50% - 360px)); top: calc(env(safe-area-inset-top) + 8px); padding: 0 8px; border-radius: 8px; }
+    .back:hover { opacity: 1; background: rgba(255,255,255,.1); }
+    .hero { position: relative; }
+    :focus-visible { outline: 3px solid var(--sky); outline-offset: 2px; }
+    footer { text-align: center; color: var(--muted); font-size: .85rem; padding: 0 16px 32px; }
+  </style>
+</head>
+<body>
+  <header class="hero">
+    <a class="back" href="../">← Deals</a>
+    <img src="../icons/apple-touch-icon.png" alt="">
+    <h1>VS Clearance</h1>
+    <p>Every Vitamin Shoppe clearance deal in one fast list — with the real “in cart” prices, what's on the shelf at your store, and a one-tap AI review.</p>
+    <ul class="features"><li>Every clearance deal</li><li>Shelf stock by store</li><li>Cost per serving</li><li>New &amp; price drops</li><li>AI review prompt</li></ul>
+  </header>
+
+  <main>
+    <section class="card" id="iphone">
+      <h2>📱 iPhone / iPad <span class="badge" id="iphone-badge" hidden>Your device</span></h2>
+      <p class="sub">Runs in Safari right on vitaminshoppe.com — no other phone needed.</p>
+      <ol>
+        <li>Install the free <b>Userscripts</b> app. <div class="row"><a class="btn tonal" href="https://apps.apple.com/us/app/userscripts/id1463298887" rel="noopener">Get Userscripts</a></div></li>
+        <li>Open <b>Settings → Apps → Safari → Extensions → Userscripts</b> (older iOS: <b>Settings → Safari → Extensions</b>), turn it on and set <b>vitaminshoppe.com</b> to <b>Allow</b>. (Open the Userscripts app once and tap “Set Userscripts Directory” if it asks.)</li>
+        <li>Open the script in Safari, tap the <b>ᴀA</b> / puzzle icon in the address bar → <b>Userscripts</b> → <b>Install</b>.
+          <div class="row"><a class="btn primary" href="../vs-clearance.user.js">Install VS Clearance</a></div></li>
+        <li>Shop: open Vitamin Shoppe and tap the green <b>🏷️ Deals</b> button.
+          <div class="row"><a class="btn tonal" href="https://www.vitaminshoppe.com/cl/clearance/0#vsdeals" rel="noopener">Open Vitamin Shoppe</a></div></li>
+      </ol>
+      <p class="note">Tip: add Vitamin Shoppe to your Home Screen from Safari's Share menu so Deals is one tap away.</p>
+    </section>
+
+    <section class="card" id="pc">
+      <h2>💻 Windows / Mac <span class="badge" id="pc-badge" hidden>Your device</span></h2>
+      <p class="sub">Edge, Chrome or Firefox on a computer.</p>
+      <ol>
+        <li>Add the free <b>Tampermonkey</b> extension.
+          <div class="row"><a class="btn tonal" href="https://microsoftedge.microsoft.com/addons/detail/tampermonkey/iikmkjmpaadaobahmlepeloendndfphd" rel="noopener">Edge</a>
+          <a class="btn tonal" href="https://chromewebstore.google.com/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo" rel="noopener">Chrome</a>
+          <a class="btn tonal" href="https://addons.mozilla.org/firefox/addon/tampermonkey/" rel="noopener">Firefox</a></div></li>
+        <li>Install the script (Tampermonkey opens an Install page).
+          <div class="row"><a class="btn primary" href="../vs-clearance.user.js">Install VS Clearance</a></div></li>
+        <li>Open Vitamin Shoppe and click <b>🏷️ Deals</b> in the corner.
+          <div class="row"><a class="btn tonal" href="https://www.vitaminshoppe.com/cl/clearance/0#vsdeals" rel="noopener">Open Vitamin Shoppe</a></div></li>
+      </ol>
+      <p class="note">Chrome/Edge may ask you to turn on “Allow user scripts” for Tampermonkey (Extensions → Tampermonkey → Details).</p>
+    </section>
+
+    <section class="card" id="android">
+      <h2>🤖 Android <span class="badge" id="android-badge" hidden>Your device</span></h2>
+      <p class="sub">A full app with store pickup stock, saved filters and offline mode.</p>
+      <div class="row"><a class="btn primary" href="../downloads/VS-Clearance.apk" download><span id="apk-label">Download the app (APK)</span></a></div>
+      <p class="note">Allow “Install unknown apps” for your browser when asked. The userscript route above works on Android too (Firefox + Tampermonkey).</p>
+    </section>
+
+    <section class="card">
+      <h2>🔒 Why it works this way</h2>
+      <p class="sub" style="margin:0">Vitamin Shoppe blocks servers and bots, so VS Clearance runs in <b>your own browser</b> while you're on their site, exactly like browsing yourself. Your filters and store stay on your device unless you choose to share your list, and links go straight to the real product pages.</p>
+    </section>
+
+    <section class="card" id="source">
+      <h2>📦 Free &amp; open source</h2>
+      <p class="sub">The complete app — Android, iPhone/PC userscript, this web page and its little server — is yours to read, change and share under the MIT license.</p>
+      <div class="row">
+        <a class="btn primary" href="../downloads/VS-Clearance-project.zip" download><span id="zip-label">Download the source (zip)</span></a>
+        <a class="btn tonal" href="../LICENSE.txt">License</a>
+      </div>
+      <details>
+        <summary>What's inside &amp; how to run your own</summary>
+        <ul class="note">
+          <li><b>app/</b> — Android app (Kotlin + Jetpack Compose). Open in Android Studio, or <code>gradlew assembleEveryoneDebug</code>.</li>
+          <li><b>web/userscript/</b> — the iPhone/PC version; <code>node web/scripts/build-userscript.mjs</code> builds <code>vs-clearance.user.js</code>.</li>
+          <li><b>web/</b> — this share page: <code>npm start</code> (Node 18+, no dependencies) serves it on port 5050. <code>web/scripts/serve.ps1</code> puts it online with Tailscale Funnel.</li>
+          <li>Start with <code>README.md</code> (Android) and <code>web/README.md</code> (iPhone, PC and the share page); <code>npm test</code> in <code>web/</code> runs the web tests.</li>
+        </ul>
+      </details>
+    </section>
+
+    <section class="card">
+      <h2>💌 Send this to a friend</h2>
+      <p class="sub">This link opens the live deals; from there anyone can get their own copy — no account needed.</p>
+      <div class="share">
+        <code id="share-url"></code>
+        <button class="btn tonal" id="copy-link" type="button">Copy link</button>
+      </div>
+    </section>
+  </main>
+  <footer>Not affiliated with The Vitamin Shoppe. Prices come from their site; “in cart” prices are estimates of their checkout discount. · <a href="#source">Open source (MIT)</a></footer>
+  <script src="landing.js"></script>
+</body>
+</html>
