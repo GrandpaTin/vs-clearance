@@ -148,10 +148,14 @@ class WebPublisher(
         if (commitCode !in 200..299) return gitHubError(commitCode, owner, name)
         val sha = commitBody!!.getString("sha")
         val (refCode, _) = gitHub("PATCH", "$git/refs/heads/deals", token, JSONObject().put("sha", sha).put("force", true))
-        if (refCode in 200..299) return null
-        // First publish: the branch doesn't exist yet.
-        val (newCode, _) = gitHub("POST", "$git/refs", token, JSONObject().put("ref", "refs/heads/deals").put("sha", sha))
-        return if (newCode in 200..299) null else gitHubError(newCode, owner, name)
+        if (refCode !in 200..299) {
+            // First publish: the branch doesn't exist yet.
+            val (newCode, _) = gitHub("POST", "$git/refs", token, JSONObject().put("ref", "refs/heads/deals").put("sha", sha))
+            if (newCode !in 200..299) return gitHubError(newCode, owner, name)
+        }
+        // Rebuild the site from main (a push to `deals` alone runs no workflow).
+        val (kick, _) = gitHub("POST", "https://api.github.com/repos/$owner/$name/dispatches", token, JSONObject().put("event_type", "deals"))
+        return if (kick in 200..299) null else "Saved to GitHub, but the site didn't start updating (${kick}). It will on the next sync."
     }
 
     private fun gitHubError(code: Int, owner: String, name: String): String = when (code) {

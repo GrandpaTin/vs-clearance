@@ -37,8 +37,8 @@ The userscript is a static file: you can also host `public/` on GitHub Pages, Ne
 
 The public site is **https://grandpatin.github.io/vs-clearance/**, built by
 `.github/workflows/pages.yml` from `web/public`. The phone publishes the list straight to
-the repo's `deals` branch (one force-updated commit holding `snapshot.json`); each push redeploys
-the site in about a minute, so it stays up with the PC and the phone both off.
+the repo's `deals` branch (one force-updated commit holding `snapshot.json`) and sends a `deals`
+repository_dispatch, which redeploys the site from main in about a minute, so it stays up with the PC and the phone both off.
 
 - **Phone:** Share to web → *Server or GitHub repo* = `github.com/GrandpaTin/vs-clearance`,
   *Publish token* = a fine-grained token with access to only that repo and **Contents: Read and write**.
@@ -47,7 +47,7 @@ the site in about a minute, so it stays up with the PC and the phone both off.
 - **Code updates:** commit here, then `node web/scripts/publish-github.mjs "What changed"`. It mirrors
   the committed files into `../vs-clearance-public` (commits use GitHub's no-reply address) and pushes.
 - **APK on the site:** attach the *everyone* build to a GitHub release as `VS-Clearance.apk`
-  (`gh release create vX.Y.Z VS-Clearance.apk`); the workflow serves the latest one under `downloads/`.
+  (`gh release create vX.Y.Z VS-Clearance.apk`), then `gh workflow run pages.yml`; the site serves the latest one under `downloads/`.
 
 ## Sharing a live list
 

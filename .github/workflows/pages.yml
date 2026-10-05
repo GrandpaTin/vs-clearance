@@ -1,12 +1,13 @@
 # Publishes the web app to GitHub Pages. The deals list lives on its own `deals` branch (one
-# commit, force-updated by the phone), so a new list redeploys the site without touching main.
+# commit, force-updated by the phone), which then sends a "deals" repository_dispatch: workflows
+# only run from main's copy of this file, and Pages only accepts deploys from main.
 name: Pages
 
 on:
   push:
-    branches: [main, deals]
-  release:
-    types: [published]
+    branches: [main]
+  repository_dispatch:
+    types: [deals]
   workflow_dispatch:
 
 permissions:
