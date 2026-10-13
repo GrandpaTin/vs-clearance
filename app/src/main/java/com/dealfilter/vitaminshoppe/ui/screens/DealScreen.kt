@@ -102,6 +102,9 @@ import com.dealfilter.vitaminshoppe.ui.theme.NavyPrimary
 import com.dealfilter.vitaminshoppe.ui.theme.SkyBlueSecondary
 import com.dealfilter.vitaminshoppe.ui.viewmodel.DealActions
 import com.dealfilter.vitaminshoppe.ui.viewmodel.DealUiState
+import androidx.compose.material3.AlertDialog
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.material3.DropdownMenuItem
@@ -135,12 +138,28 @@ fun DealScreen(viewModel: DealViewModel, modifier: Modifier = Modifier) {
             onDismiss = viewModel::closeWebShare
         )
     }
+    state.pendingPairing?.let { (url, _) ->
+        AlertDialog(
+            onDismissRequest = viewModel::rejectPairing,
+            title = { Text("Share deals to the web?") },
+            text = {
+                Text(
+                    "This link asks VS Clearance to publish your deal list to " +
+                        (android.net.Uri.parse(url).host ?: url) + ". Only accept links you made yourself."
+                )
+            },
+            confirmButton = { Button(onClick = viewModel::acceptPairing) { Text("Share there") } },
+            dismissButton = { TextButton(onClick = viewModel::rejectPairing) { Text("Cancel") } }
+        )
+    }
     if (state.update.isDialogOpen) {
         UpdateDialog(
             update = state.update,
             onUpdate = viewModel::startUpdate,
             onOpenSettings = { viewModel.openInstallPermission(context) },
             onLater = viewModel::laterUpdate,
+            onHide = viewModel::closeUpdate,
+            onCancelDownload = viewModel::cancelUpdateDownload,
             onDismiss = viewModel::closeUpdate
         )
     }
@@ -216,12 +235,14 @@ fun DealScreenContent(state: DealUiState, viewModel: DealActions, modifier: Modi
                         Column {
                             Text(
                                 "Clearance Deals",
-                                style = MaterialTheme.typography.titleLarge,
+                                style = if (largeFont) MaterialTheme.typography.titleMedium else MaterialTheme.typography.titleLarge,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White,
                                 modifier = Modifier.semantics { heading() }
                             )
-                            HeaderSubtitle(state, now)
+                            HeaderSubtitle(state, now, compact = largeFont)
                         }
                     },
                     actions = {
@@ -432,8 +453,8 @@ fun DealScreenContent(state: DealUiState, viewModel: DealActions, modifier: Modi
     }
 }
 
-/** banner, mode, discount, categories — the summary header is the next item. */
-private const val HEADER_ITEMS = 4
+/** mode, discount, categories — the sticky summary header is the next item. */
+private const val HEADER_ITEMS = 3
 
 private fun clearDescription(state: DealUiState): String {
     val parts = listOfNotNull(
@@ -498,8 +519,10 @@ private fun rememberNowMillis(): Long {
 }
 
 @Composable
-private fun HeaderSubtitle(state: DealUiState, now: Long) {
+private fun HeaderSubtitle(state: DealUiState, now: Long, compact: Boolean) {
+    // At large font sizes the bar has room for one short line only ("4 min ago").
     val updated = state.lastUpdatedMillis?.let { ago(it, now) }
+        ?.let { if (compact) it.replace(" minutes", " min").replace(" minute", " min").replace(" hours", " hr").replace(" hour", " hr") else it }
     val text = when {
         state.status == LoadStatus.LOADING -> "Loading live prices…"
         state.status == LoadStatus.REFRESHING -> "Refreshing…"
@@ -508,7 +531,13 @@ private fun HeaderSubtitle(state: DealUiState, now: Long) {
         updated != null -> "Updated $updated"
         else -> "Live from vitaminshoppe.com"
     }
-    Text(text, style = MaterialTheme.typography.labelMedium, color = Color.White.copy(alpha = 0.85f))
+    Text(
+        text,
+        style = MaterialTheme.typography.labelMedium,
+        color = Color.White.copy(alpha = 0.85f),
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis
+    )
 }
 
 @Composable
@@ -580,7 +609,17 @@ private fun Banners(state: DealUiState, viewModel: DealActions, now: Long) {
     val badges = DealTheme.badges
     Column {
         val release = state.update.available
-        if (release != null && state.update.showBanner) {
+        val downloading = state.update.progress
+        if (release != null && downloading != null && !state.update.isDialogOpen) {
+            Banner(
+                icon = Icons.Default.SystemUpdate,
+                text = "Downloading update ${release.versionName}… ${(downloading * 100).toInt()}%",
+                container = badges.skyBlueContainer,
+                content = badges.onSkyBlueContainer,
+                action = "Show",
+                onAction = viewModel::openUpdate
+            )
+        } else if (release != null && state.update.showBanner) {
             Banner(
                 icon = Icons.Default.SystemUpdate,
                 text = "Update available: ${release.versionName}",
@@ -638,6 +677,8 @@ private fun Banner(
         modifier = Modifier
             .fillMaxWidth()
             .padding(start = 12.dp, end = 12.dp, top = 12.dp)
+            // Screen readers announce a banner when it appears (refresh failed, update ready...).
+            .semantics(mergeDescendants = false) { liveRegion = LiveRegionMode.Polite }
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp)) {
             Icon(icon, contentDescription = null, tint = content, modifier = Modifier.size(20.dp))

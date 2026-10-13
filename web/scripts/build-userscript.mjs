@@ -3,9 +3,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { execFileSync } from 'node:child_process';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+// Userscript managers only update when @version goes up: app version + commit count does on every change.
+const appVersion = (fs.readFileSync(path.join(root, '..', 'version.properties'), 'utf8').match(/versionName=([\d.]+)/) || [])[1] || '3.1.0';
+let build = process.env.USERSCRIPT_BUILD;
+if (!build) { try { build = execFileSync('git', ['rev-list', '--count', 'HEAD'], { cwd: root }).toString().trim(); } catch { build = '0'; } }
+const version = `${appVersion}.${build}`;
 const read = (p) => fs.readFileSync(path.join(root, p), 'utf8');
 
 const core = read('public/core.js').replace(/^export\s+/gm, '');
@@ -16,7 +21,7 @@ const base = process.env.PUBLIC_URL || 'https://dn.tail59aab8.ts.net:10000';
 const header = `// ==UserScript==
 // @name         VS Clearance — Vitamin Shoppe deal finder
 // @namespace    vs-clearance
-// @version      ${pkg.version}
+// @version      ${version}
 // @description  Every Vitamin Shoppe clearance deal with real cart prices, your store's shelf stock, filters, and an AI review prompt.
 // @match        https://www.vitaminshoppe.com/*
 // @run-at       document-idle

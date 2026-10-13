@@ -9,7 +9,13 @@ import android.os.Build
 import android.provider.Settings
 import androidx.core.content.FileProvider
 import com.dealfilter.vitaminshoppe.BuildConfig
+import kotlin.coroutines.coroutineContext
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -62,7 +68,20 @@ open class AppUpdater(
 ) {
     private val prefs = context.getSharedPreferences("vs_updates", Context.MODE_PRIVATE)
     private val lock = Mutex()
-    private val _state = MutableStateFlow(UpdateState())
+
+    /** Downloads belong to the app, not a screen: they survive the screen going away. */
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var downloadJob: Job? = null
+
+    // The last release found survives the app being closed, so its banner is back on the next launch.
+    private val _state = MutableStateFlow(
+        UpdateState(
+            available = prefs.getString(K_RELEASE, null)
+                ?.let { runCatching { parseRelease(it) }.getOrNull() }
+                ?.takeIf { it.versionCode > currentVersionCode },
+            dismissed = prefs.getInt(K_DISMISSED, 0).let { d -> d != 0 && d == (prefs.getString(K_RELEASE, null)?.let { runCatching { parseRelease(it)?.versionCode }.getOrNull() }) }
+        )
+    )
     val state: StateFlow<UpdateState> = _state.asStateFlow()
 
     private val apkFile: File get() = File(File(context.cacheDir, "updates").apply { mkdirs() }, "VS-Clearance-update.apk")
@@ -73,8 +92,9 @@ open class AppUpdater(
         if (!force && now - prefs.getLong(K_CHECKED, 0L) < DAY_MS) return@withLock null
         _state.update { it.copy(isChecking = true, error = null) }
         val result = withContext(Dispatchers.IO) { runCatching { fetchLatest() } }
-        prefs.edit().putLong(K_CHECKED, now).apply()
-        val release = result.getOrNull()
+        // Only a check that got an answer counts; an offline morning mustn't silence it for a day.
+        if (result.isSuccess) prefs.edit().putLong(K_CHECKED, now).putString(K_RELEASE, result.getOrNull()?.second).apply()
+        val release = result.getOrNull()?.first
         val newer = release?.takeIf { it.versionCode > currentVersionCode }
         val dismissedCode = prefs.getInt(K_DISMISSED, 0)
         _state.update {
@@ -100,23 +120,43 @@ open class AppUpdater(
         _state.update { it.copy(isDialogOpen = false, dismissed = true) }
     }
 
-    /** Downloads (if needed), verifies, then opens Android's installer. */
+    fun startDownloadAndInstall() {
+        if (downloadJob?.isActive == true) return
+        downloadJob = scope.launch { downloadAndInstall() }
+    }
+
+    fun cancelDownload() {
+        downloadJob?.cancel()
+        _state.update { it.copy(progress = null) }
+    }
+
+    /** Downloads (unless a verified copy is already here), verifies, then opens Android's installer. */
     suspend fun downloadAndInstall() {
         val release = _state.value.available ?: return
-        if (!_state.value.readyToInstall) {
-            _state.update { it.copy(progress = 0f, error = null, needsInstallPermission = false) }
-            val error = withContext(Dispatchers.IO) { download(release) }
-            if (error != null) {
-                _state.update { it.copy(progress = null, error = error) }
-                return
+        val haveFile = withContext(Dispatchers.IO) { apkFile.exists() && verifyMatchesInstalledApp(apkFile, release) == null }
+        if (!haveFile) {
+            _state.update { it.copy(progress = 0f, error = null, needsInstallPermission = false, readyToInstall = false) }
+            try {
+                val error = withContext(Dispatchers.IO) { download(release) }
+                if (error != null) {
+                    _state.update { it.copy(error = error) }
+                    return
+                }
+            } finally {
+                _state.update { it.copy(progress = null) }
             }
-            _state.update { it.copy(progress = null, readyToInstall = true) }
         }
+        _state.update { it.copy(readyToInstall = true) }
         install()
     }
 
     /** Opens the installer for an already downloaded file, or explains the permission it needs. */
     fun install() {
+        if (!apkFile.exists()) {
+            // The system may clear the cache; start over rather than hand the installer nothing.
+            _state.update { it.copy(readyToInstall = false, error = "The download was cleared. Tap Try again to download it once more.") }
+            return
+        }
         if (!canInstall()) {
             _state.update { it.copy(needsInstallPermission = true) }
             return
@@ -149,7 +189,8 @@ open class AppUpdater(
     open fun canInstall(): Boolean =
         Build.VERSION.SDK_INT < Build.VERSION_CODES.O || context.packageManager.canRequestPackageInstalls()
 
-    private fun fetchLatest(): AppRelease? {
+    /** The parsed release plus its raw JSON (kept so the banner survives a restart). */
+    private fun fetchLatest(): Pair<AppRelease?, String?> {
         val conn = (URL(latestUrl).openConnection() as HttpURLConnection).apply {
             connectTimeout = 10_000
             readTimeout = 15_000
@@ -157,15 +198,16 @@ open class AppUpdater(
             setRequestProperty("User-Agent", "VS-Clearance-Android")
         }
         try {
-            if (conn.responseCode == 404) return null // no release published yet
+            if (conn.responseCode == 404) return null to null // no release published yet
             if (conn.responseCode !in 200..299) throw IllegalStateException("HTTP ${conn.responseCode}")
-            return parseRelease(conn.inputStream.bufferedReader().use { it.readText() })
+            val json = conn.inputStream.bufferedReader().use { it.readText() }
+            return parseRelease(json) to json
         } finally {
             conn.disconnect()
         }
     }
 
-    private fun download(release: AppRelease): String? {
+    private suspend fun download(release: AppRelease): String? {
         val target = apkFile
         val partial = File(target.parentFile, target.name + ".part")
         try {
@@ -184,6 +226,7 @@ open class AppUpdater(
                         var done = 0L
                         var lastShown = 0f
                         while (true) {
+                            coroutineContext.ensureActive()
                             val n = input.read(buf)
                             if (n < 0) break
                             out.write(buf, 0, n)
@@ -207,6 +250,9 @@ open class AppUpdater(
         } catch (e: IOException) {
             partial.delete()
             return "The download stopped — check your connection and try again."
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            partial.delete()
+            throw e
         }
     }
 
@@ -240,6 +286,7 @@ open class AppUpdater(
         const val APK_NAME = "VS-Clearance.apk"
         private const val K_CHECKED = "checked"
         private const val K_DISMISSED = "dismissed"
+        private const val K_RELEASE = "release"
         private const val DAY_MS = 24 * 3600_000L
 
         private val VERSION_CODE = Regex("""versionCode:\s*(\d+)""")

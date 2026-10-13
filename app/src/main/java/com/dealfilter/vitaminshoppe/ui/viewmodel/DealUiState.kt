@@ -46,6 +46,8 @@ data class DealUiState(
     val needsVerification: Boolean = false,
     val webShare: com.dealfilter.vitaminshoppe.data.remote.WebShareState = com.dealfilter.vitaminshoppe.data.remote.WebShareState(),
     val isWebShareOpen: Boolean = false,
+    /** A vsdeals://publish link waiting for the user's OK: (url, token). */
+    val pendingPairing: Pair<String, String>? = null,
     val update: com.dealfilter.vitaminshoppe.data.update.UpdateState = com.dealfilter.vitaminshoppe.data.update.UpdateState(),
     val message: String? = null
 ) {

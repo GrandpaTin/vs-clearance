@@ -97,7 +97,8 @@ class WebPublisherTest {
         val s = p.state.value
         assertTrue(s.pending)
         assertNull(s.lastError)
-        assertEquals("Will sync when online", shareStatusText(s, 0))
+        // The reason names what's missing: here the owner's server, not the internet.
+        assertEquals("Will sync when 127.0.0.1 is reachable", shareStatusText(s, 0))
         assertTrue(prefs.getBoolean("pending", false))
     }
 

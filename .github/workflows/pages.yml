@@ -45,7 +45,7 @@ jobs:
           BASE: ${{ steps.pages.outputs.base_url }}
         run: |
           set -euo pipefail
-          PUBLIC_URL="$BASE" node web/scripts/build-userscript.mjs
+          PUBLIC_URL="$BASE" USERSCRIPT_BUILD="$(git rev-list --count HEAD)" node web/scripts/build-userscript.mjs
           mkdir -p _site
           cp -r web/public/. _site/
           # A new code version gets a new service worker, so open tabs offer "New version available".

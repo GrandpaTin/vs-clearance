@@ -33,7 +33,11 @@ import {
       if (!res.ok) throw new Error(`Vitamin Shoppe answered ${res.status}.`);
       throw new Blocked('Vitamin Shoppe sent a check page instead of data.');
     }
-    if (!res.ok && !isListingDespiteStatus(res.status, data)) throw new Error(`Vitamin Shoppe answered ${res.status}.`);
+    if (!res.ok && !isListingDespiteStatus(res.status, data)) {
+      throw new Error(res.status === 404
+        ? "Vitamin Shoppe's clearance search came back empty (404) — the site may have changed; check for a VS Clearance update."
+        : `Vitamin Shoppe answered ${res.status}.`);
+    }
     return data;
   }
 
@@ -89,6 +93,8 @@ import {
       for (let p = 2; p <= Math.min(first.totalPages, 25); p++) raw = raw.concat(parseClearancePage(await getJson(clearanceUrl(p))).items);
       const seen = new Set();
       raw = raw.filter((o) => !seen.has(o.id) && seen.add(o.id));
+      // Clearance is never really empty; an empty answer is a hiccup, so keep the saved list.
+      if (!raw.length) throw new Error('Vitamin Shoppe sent an empty clearance list.');
       const previous = state.items;
       state.raw = raw; state.savedAt = Date.now();
       put('cache', { savedAt: state.savedAt, items: raw });
@@ -174,7 +180,7 @@ import {
     const q = storeSearch.query.trim();
     if (!q) { storeSearch.message = 'Enter a ZIP code or city to find stores.'; return renderSheet(); }
     if (/^\d+$/.test(q) && q.length !== 5) { storeSearch.message = 'ZIP codes have 5 digits.'; return renderSheet(); }
-    storeSearch.searching = true; storeSearch.message = null; renderSheet();
+    storeSearch.searching = true; storeSearch.message = null; storeSearch.blocked = false; renderSheet();
     try {
       const { stores, status } = parseStores(await getJson(storeSearchUrl(q)));
       storeSearch.results = stores;
@@ -183,6 +189,7 @@ import {
       put('storeQuery', q);
     } catch (e) {
       storeSearch.message = e.message;
+      storeSearch.blocked = e instanceof Blocked;
     } finally {
       storeSearch.searching = false; renderSheet();
     }
@@ -216,6 +223,7 @@ import {
         <ul class="list" data-ref="list"></ul>
         <div class="status" data-ref="status" hidden></div>
         <div class="share-line" data-ref="shareLine" hidden></div>
+        <p class="foot-note"><button class="link-btn" data-act="hide-launcher">Hide the 🏷️ Deals button</button> · open again from vitaminshoppe.com/#vsdeals</p>
       </div>
       <div class="sheet-wrap" data-ref="sheetWrap" hidden><div class="sheet" data-ref="sheet" role="dialog" aria-modal="true"></div></div>
       <div class="toast" data-ref="toast" hidden></div>
@@ -231,8 +239,15 @@ import {
     const stale = !state.savedAt || Date.now() - state.savedAt > 10 * 60_000;
     if (stale) loadDeals();
   }
+  // Like the Android app: a failed or old list refreshes when the connection or the tab comes back.
+  const listIsOld = () => !state.savedAt || Date.now() - state.savedAt > 30 * 60_000;
+  window.addEventListener('online', () => { if (state.open && (state.error || listIsOld())) loadDeals(); });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && state.open && listIsOld()) loadDeals();
+  });
+
   function closeApp() {
-    state.open = false; app.hidden = true; launcher.hidden = false;
+    state.open = false; app.hidden = true; launcher.hidden = !get('launcher', true);
     document.documentElement.style.overflow = '';
     if (location.hash === '#vsdeals') history.replaceState(null, '', location.pathname + location.search);
   }
@@ -264,7 +279,7 @@ import {
       banner.innerHTML = `<div class="banner warn"><span><b>Quick check needed.</b> Vitamin Shoppe wants to confirm a person is browsing. Close this, complete any check on the page (or reload it), then reopen Deals.</span>
         <button class="text-btn" data-act="reload-page">Reload page</button></div>`;
     } else if (state.error && state.items.length) {
-      banner.innerHTML = `<div class="banner warn"><span>Couldn't refresh · showing deals from ${relativeTime(state.savedAt)}.</span><button class="text-btn" data-act="refresh">Retry</button></div>`;
+      banner.innerHTML = `<div class="banner warn"><span><b>Couldn't refresh.</b> ${esc(state.error.replace(/\.$/, ''))} · showing deals from ${relativeTime(state.savedAt)}.</span><button class="text-btn" data-act="refresh">Retry</button></div>`;
     } else if (state.stockError) {
       banner.innerHTML = `<div class="banner bad"><span>${esc(state.stockError)}</span><button class="text-btn" data-act="retry-stock">Retry</button></div>`;
     } else banner.innerHTML = '';
@@ -276,7 +291,7 @@ import {
       list.innerHTML = state.loading ? '<li class="skeleton"></li>'.repeat(4) : '';
       status.hidden = state.loading;
       status.innerHTML = state.loading ? '' : statusHtml(state.blocked ? '🛡️' : '⚠️',
-        state.blocked ? 'Quick check needed' : "Couldn't load deals", esc(state.error || 'Try again.'),
+        state.blocked ? 'Quick check needed' : "Couldn't load deals", esc(state.error || "Vitamin Shoppe didn't send any deals."),
         [[state.blocked ? 'Reload page' : 'Try again', state.blocked ? 'reload-page' : 'refresh', true]]);
       return;
     }
@@ -324,7 +339,11 @@ import {
     const isNew = state.changes.newIds.has(d.id); const was = state.changes.drops.get(d.id);
     let stock, dot = '';
     if (state.store && state.stockLoading && d.qty == null) stock = 'Checking shelf…';
-    else if (hasStock() && d.qty > 0) { stock = `${d.qty} on the shelf`; dot = 'good'; }
+    else if (hasStock() && d.qty > 0) {
+      stock = `${d.qty} on the shelf` + (d.pickup === false ? ' · walk-in only' : '') +
+        (Date.now() - (state.stock.at || 0) > 6 * 3600e3 ? ` (checked ${relativeTime(state.stock.at)})` : '');
+      dot = 'good';
+    }
     else if (hasStock() && d.qty != null) stock = d.oos ? 'Not in store · sold out online' : 'Not in store · ships';
     else if (d.oos) { stock = 'Out of stock online'; dot = 'bad'; }
     else { stock = 'In stock online'; dot = 'good'; }
@@ -393,7 +412,7 @@ import {
       sheet.innerHTML = `<h2>Choose your store</h2><p class="muted">We'll check which clearance items are on the shelf there.</p>
         <form data-ref="storeForm" class="store-form"><input type="search" inputmode="search" placeholder="ZIP code or City, ST" value="${esc(storeSearch.query)}" aria-label="ZIP code or city">
           <button class="primary-btn" type="submit">${storeSearch.searching ? '…' : 'Search'}</button></form>
-        ${storeSearch.message ? `<p class="err">${esc(storeSearch.message)}</p>` : ''}
+        ${storeSearch.message ? `<p class="err">${esc(storeSearch.message)}${storeSearch.blocked ? ' Reload the page, complete any check, then search again.' : ''}</p>${storeSearch.blocked ? '<button class="outline-btn" data-act="reload-page">Reload page</button>' : ''}` : ''}
         <div class="stores">${rows}</div>
         ${state.store ? '<button class="outline-btn" data-act="clear-store">Clear store · ship to home only</button>' : ''}
         <button class="text-btn close" data-act="close-sheet">Close</button>`;
@@ -427,6 +446,7 @@ import {
       case 'refresh': return loadDeals();
       case 'retry-stock': return loadStock();
       case 'reload-page': location.hash = 'vsdeals'; return location.reload();
+      case 'hide-launcher': put('launcher', false); closeApp(); return;
       case 'mode':
         if (v === 'pickup' && !state.store) return openSheet('stores');
         return update(() => { state.mode = v; });
@@ -518,6 +538,9 @@ import {
     if (!document.body) return setTimeout(mount, 50);
     document.body.appendChild(host);
     const paired = takePairing();
+    // Coming in through #vsdeals brings a hidden Deals button back.
+    if (location.hash === '#vsdeals') put('launcher', true);
+    launcher.hidden = !get('launcher', true);
     if (paired || location.hash === '#vsdeals') openApp();
     if (paired && state.raw.length && state.savedAt && Date.now() - state.savedAt <= 10 * 60_000) publish();
   }

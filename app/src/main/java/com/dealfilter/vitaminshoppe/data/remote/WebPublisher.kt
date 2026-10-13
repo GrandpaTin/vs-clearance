@@ -36,6 +36,8 @@ data class WebShareState(
     val lastError: String? = null,
     /** The last attempt couldn't reach its target; the list goes out on the next chance. */
     val pending: Boolean = false,
+    /** Why it's waiting, e.g. "Will sync when dn.example.ts.net is reachable". */
+    val pendingReason: String? = null,
     val isPublishing: Boolean = false
 ) {
     enum class Status { NOT_SET_UP, OFF, SYNCING, WAITING, ERROR, LIVE, READY }
@@ -163,7 +165,7 @@ class WebPublisher(
                 } catch (e: IOException) {
                     Outcome("Will sync when online", retryLater = true)
                 } catch (e: Exception) {
-                    Outcome("Couldn't publish to GitHub (${e.javaClass.simpleName}).")
+                    Outcome("GitHub sent an unexpected reply. Try again in a minute.")
                 }
             } else {
                 publishToServer(s, buildPayload(items, savedAt, store, stockStoreId, stock))
@@ -176,6 +178,7 @@ class WebPublisher(
             it.copy(
                 isPublishing = false,
                 pending = outcome.retryLater,
+                pendingReason = if (outcome.retryLater) outcome.error else null,
                 lastError = if (outcome.retryLater) null else outcome.error,
                 lastPublishedAt = if (ok) now else it.lastPublishedAt
             )

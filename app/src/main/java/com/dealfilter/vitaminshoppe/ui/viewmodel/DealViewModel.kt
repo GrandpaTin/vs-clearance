@@ -124,6 +124,7 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
         viewModelScope.launch {
             restoreJob.join()
             if (isRefreshDue(System.currentTimeMillis())) refreshInternal(auto = true)
+            else if (publisher.state.value.pending) shareIfOn()
         }
         // At most once a day; quiet unless there's something new.
         viewModelScope.launch { updater.check() }
@@ -242,7 +243,8 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
                 // Save the fresh list now, keeping the last good stock for the same store until
                 // the new stock check finishes (it may fail or the app may be killed meanwhile).
                 val store = _uiState.value.selectedStore
-                persistCache(items, now, carried?.first, carried?.second ?: emptyMap())
+                // With a store, the stock check that follows publishes (once, with fresh stock).
+                persistCache(items, now, carried?.first, carried?.second ?: emptyMap(), publish = store == null)
                 if (store != null) startStockLoad(store) else stockJob?.cancel()
             } catch (e: CancellationException) {
                 throw e
@@ -293,9 +295,12 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
             } catch (e: FetchException.VerificationRequired) {
                 afterVerification["stock"] = { _uiState.value.selectedStore?.let { startStockLoad(it) } }
                 _uiState.update { it.copy(stockError = "Complete the verification to check shelf stock at ${store.name}.") }
+                shareIfOn()
             } catch (e: Exception) {
                 val detail = e.message?.let { " $it" } ?: ""
                 _uiState.update { it.copy(stockError = "Couldn't check stock at ${store.name}.$detail") }
+                // The fresh deals still go out, just without this store's stock.
+                shareIfOn()
             }
         }
         stockJob = job
@@ -318,7 +323,7 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
             item.copy(storeQuantity = item.jdaSkuId?.let { sku -> stock[sku] ?: if (missingIsUnknown) null else 0 })
         }
 
-    private suspend fun persistCache(items: List<DealItem>, savedAt: Long, stockStoreId: String?, stock: Map<String, Int>) {
+    private suspend fun persistCache(items: List<DealItem>, savedAt: Long, stockStoreId: String?, stock: Map<String, Int>, publish: Boolean = true) {
         val changes = _uiState.value.changes
         withContext(NonCancellable + Dispatchers.IO) {
             cacheLock.withLock {
@@ -327,7 +332,7 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
         }
         // Every saved list (fresh deals, then shelf stock) also goes to the user's web server if enabled.
         // Never awaited: sharing must not slow the list down, and its failures stay in the sheet.
-        if (publisher.state.value.enabled && publisher.state.value.isConfigured) {
+        if (publish && publisher.state.value.enabled && publisher.state.value.isConfigured) {
             val store = _uiState.value.selectedStore
             viewModelScope.launch { publisher.publish(items, savedAt, store, stockStoreId, stock) }
         }
@@ -341,7 +346,8 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
     override fun openWebShare() {
         _uiState.update { it.copy(isWebShareOpen = true) }
         val share = publisher.state.value
-        if (share.isConfigured && !share.isPublishing && _uiState.value.allDeals.isNotEmpty()) publishNow()
+        // Only when sharing is on: with it off, opening the sheet must not publish anything.
+        if (share.enabled && share.isConfigured && !share.isPublishing && _uiState.value.allDeals.isNotEmpty()) publishNow()
     }
 
     fun closeWebShare() = _uiState.update { it.copy(isWebShareOpen = false) }
@@ -356,6 +362,11 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
 
     /** Publishes what's on screen now (deals + current shelf stock). */
     fun publishNow() = publishCurrent(announce = true)
+
+    private fun shareIfOn() {
+        val share = publisher.state.value
+        if (share.enabled && share.isConfigured) publishCurrent(announce = false)
+    }
 
     private fun publishCurrent(announce: Boolean) {
         val s = _uiState.value
@@ -375,7 +386,7 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
             if (!announce) return@launch
             showMessage(
                 when {
-                    publisher.state.value.pending -> "Saved for later — it will sync when online"
+                    publisher.state.value.pending -> "Saved for later — " + (publisher.state.value.pendingReason ?: "it will sync when online").replaceFirstChar { it.lowercase() }
                     error != null -> error
                     publisher.state.value.isGitHub -> "Published ${s.allDeals.size} deals — live on the site in about a minute"
                     else -> "Published ${s.allDeals.size} deals to the web app"
@@ -384,13 +395,20 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
         }
     }
 
-    /** vsdeals://publish?url=...&token=... opened on the phone. */
+    /** vsdeals://publish?url=...&token=... opened on the phone: any web page can open one, so ask first. */
     fun handlePairingLink(uri: android.net.Uri?) {
-        val (url, token) = WebPublisher.parsePairingLink(uri) ?: return
+        val link = WebPublisher.parsePairingLink(uri) ?: return
+        _uiState.update { it.copy(pendingPairing = link) }
+    }
+
+    fun acceptPairing() {
+        val (url, token) = _uiState.value.pendingPairing ?: return
         publisher.configure(url, token, enabled = true)
-        _uiState.update { it.copy(isWebShareOpen = true, message = "Web sharing turned on") }
+        _uiState.update { it.copy(pendingPairing = null, isWebShareOpen = true, message = "Web sharing turned on") }
         if (_uiState.value.hasData) publishNow()
     }
+
+    fun rejectPairing() = _uiState.update { it.copy(pendingPairing = null) }
 
     // -------------------------------------------------------------------------------------------
     // Filters
@@ -629,9 +647,9 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
 
     override fun openUpdate() = updater.openDialog()
 
-    fun startUpdate() {
-        viewModelScope.launch { updater.downloadAndInstall() }
-    }
+    fun startUpdate() = updater.startDownloadAndInstall()
+
+    fun cancelUpdateDownload() = updater.cancelDownload()
 
     fun laterUpdate() = updater.dismiss()
 

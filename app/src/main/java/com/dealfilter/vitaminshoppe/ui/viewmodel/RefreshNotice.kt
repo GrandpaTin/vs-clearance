@@ -15,15 +15,17 @@ fun refreshNotice(s: DealUiState, now: Long): RefreshNotice? {
     if (s.status != LoadStatus.IDLE || !s.hasData) return null
     val updated = s.lastUpdatedMillis
     val saved = if (updated == null) "Showing saved deals" else "Showing deals saved ${ago(updated, now)}"
+    // The header already says how recent the list is; the banner only repeats it once it matters.
+    val recent = updated != null && now - updated < STALE_AFTER_MS
     return when {
         s.needsVerification -> RefreshNotice(
             RefreshNotice.Kind.VERIFY, "Vitamin Shoppe wants a quick check before it shows new prices", saved, "Verify"
         )
         s.loadError != null && s.loadErrorIsOffline -> RefreshNotice(
-            RefreshNotice.Kind.OFFLINE, "You're offline", "$saved · they'll refresh when you reconnect", "Retry"
+            RefreshNotice.Kind.OFFLINE, "You're offline", if (recent) "Deals refresh when you reconnect" else "$saved · they'll refresh when you reconnect", "Retry"
         )
         s.loadError != null -> RefreshNotice(
-            RefreshNotice.Kind.FAILED, "Couldn't refresh", "${s.loadError.trimEnd('.')}. $saved.", "Retry"
+            RefreshNotice.Kind.FAILED, "Couldn't refresh", if (recent) "${s.loadError.trimEnd('.')}." else "${s.loadError.trimEnd('.')}. $saved.", "Retry"
         )
         updated != null && now - updated >= STALE_AFTER_MS -> RefreshNotice(
             RefreshNotice.Kind.STALE, "These prices may be out of date", saved, "Refresh"

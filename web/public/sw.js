@@ -4,7 +4,7 @@ const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'core.js', 'manifest.
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', (e) => {
@@ -17,7 +17,9 @@ self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET' || url.origin !== self.location.origin) return;
   if (url.pathname.endsWith('/api/snapshot')) {
-    e.respondWith(fetch(e.request).then((res) => {
+    // Revalidate with the server (GitHub Pages lets browsers keep files 10 minutes), so a new page
+  // never runs with the previous version's scripts.
+  e.respondWith(fetch(e.request, { cache: 'no-cache' }).then((res) => {
       if (res.ok) { const copy = res.clone(); caches.open(VERSION).then((c) => c.put('api/snapshot', copy)); }
       return res;
     }).catch(() => caches.match('api/snapshot').then((r) => {

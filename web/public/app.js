@@ -170,6 +170,8 @@ function renderHeader() {
     : '<b>Clearance deals, shared with you.</b> Browse here, or <a href="get/">get the free app</a> for your store’s shelf stock.';
   const banner = $('banner');
   const hadFocus = banner.contains(document.activeElement);
+  // The "new version" notice owns the banner slot until the reload.
+  if (!$('update-banner').hidden) { banner.hidden = true; return; }
   if (snap && state.error) {
     banner.hidden = false;
     banner.innerHTML = `<span>${state.error === 'offline' ? 'You’re offline' : 'Couldn’t check for updates'} · showing the last deals loaded.</span>` +
@@ -463,6 +465,14 @@ async function shareDeal(d) {
   }
 }
 
+// Offline (images aren't cached) or a missing product photo: show the 📦 placeholder, not a broken icon.
+$('list').addEventListener('error', (e) => {
+  const img = e.target;
+  if (img.tagName !== 'IMG') return;
+  img.parentNode.classList.add('none');
+  img.replaceWith('📦');
+}, true);
+
 let typing;
 $('q').addEventListener('input', (e) => {
   $('q-clear').hidden = !e.target.value;
@@ -586,7 +596,7 @@ setInterval(() => { if (state.snapshot && document.visibilityState === 'visible'
 // A new version of the site: the new service worker takes over and the page offers a reload.
 // (Not on the very first visit, when there was no worker before.)
 if ('serviceWorker' in navigator) {
-  const hadWorker = !!navigator.serviceWorker.controller;
+  let hadWorker = !!navigator.serviceWorker.controller;
   navigator.serviceWorker.register('sw.js').then((reg) => {
     // A tab left open for days still learns about new versions: hourly, and whenever it's looked at again.
     const check = () => { if (document.visibilityState === 'visible') reg.update().catch(() => {}); };
@@ -594,7 +604,8 @@ if ('serviceWorker' in navigator) {
     document.addEventListener('visibilitychange', check);
   }).catch(() => {});
   navigator.serviceWorker.addEventListener('controllerchange', () => {
-    if (hadWorker) $('update-banner').hidden = false;
+    if (hadWorker) { $('update-banner').hidden = false; $('banner').hidden = true; }
+    hadWorker = true; // the first worker taking over isn't news; the next one is
   });
 }
 

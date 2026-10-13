@@ -54,7 +54,7 @@ fun shareStatusText(share: WebShareState, now: Long): String = when (share.statu
     WebShareState.Status.NOT_SET_UP -> "Not set up — the app works fine without it."
     WebShareState.Status.OFF -> "Sharing is off."
     WebShareState.Status.SYNCING -> "Syncing…"
-    WebShareState.Status.WAITING -> "Will sync when online"
+    WebShareState.Status.WAITING -> share.pendingReason ?: "Will sync when online"
     WebShareState.Status.ERROR -> share.lastError ?: "Couldn't sync."
     WebShareState.Status.LIVE -> {
         val at = share.lastPublishedAt ?: now
@@ -162,13 +162,13 @@ fun WebShareSheet(
 
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
                 OutlinedButton(
-                    onClick = { onSave(repo, repoToken, server, serverToken, true) },
+                    onClick = { onSave(repo, repoToken, server, serverToken, share.enabled || !share.isConfigured) },
                     enabled = dirty,
                     modifier = Modifier.weight(1f).heightIn(min = 48.dp)
                 ) { Text("Save") }
                 Button(
                     onClick = {
-                        if (dirty) onSave(repo, repoToken, server, serverToken, true)
+                        if (dirty) onSave(repo, repoToken, server, serverToken, share.enabled || !share.isConfigured)
                         onPublishNow()
                     },
                     enabled = canPublish && !share.isPublishing,

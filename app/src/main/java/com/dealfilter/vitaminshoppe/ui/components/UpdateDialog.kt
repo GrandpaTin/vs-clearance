@@ -31,13 +31,15 @@ fun UpdateDialog(
     onUpdate: () -> Unit,
     onOpenSettings: () -> Unit,
     onLater: () -> Unit,
+    onHide: () -> Unit,
+    onCancelDownload: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val release = update.available ?: return
     val downloading = update.progress != null
     val sizeMb = if (release.apkBytes > 0) " · %.0f MB".format(release.apkBytes / 1_048_576.0) else ""
     AlertDialog(
-        onDismissRequest = { if (!downloading) onDismiss() },
+        onDismissRequest = onDismiss,
         title = { Text("Update to ${release.versionName}") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -72,7 +74,8 @@ fun UpdateDialog(
         },
         confirmButton = {
             when {
-                downloading -> Unit
+                // Keeps downloading in the background; the banner shows progress.
+                downloading -> Button(onClick = onHide) { Text("Hide") }
                 update.needsInstallPermission -> Button(onClick = onOpenSettings) { Text("Open settings") }
                 else -> Button(onClick = onUpdate) {
                     Text(
@@ -86,7 +89,12 @@ fun UpdateDialog(
             }
         },
         dismissButton = {
-            if (!downloading) TextButton(onClick = onLater) { Text("Later") }
+            when {
+                downloading -> TextButton(onClick = onCancelDownload) { Text("Cancel") }
+                // Not now: the permission step comes back next time; "Later" would skip this version.
+                update.needsInstallPermission -> TextButton(onClick = onHide) { Text("Not now") }
+                else -> TextButton(onClick = onLater) { Text("Later") }
+            }
         }
     )
 }

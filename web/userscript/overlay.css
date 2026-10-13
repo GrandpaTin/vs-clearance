@@ -145,3 +145,6 @@ pre { white-space: pre-wrap; background: var(--surface-2); border-radius: 12px; 
 .share-line { display: flex; align-items: center; gap: 4px; margin: 0 12px 12px; padding: 4px 4px 4px 14px; border-radius: 12px; background: var(--surface-2); color: var(--muted); font-size: .9rem; }
 .share-line span { flex: 1; }
 .share-line a { color: var(--link); text-decoration: none; }
+
+.foot-note { text-align: center; color: var(--muted); font-size: .8rem; padding: 4px 16px 24px; }
+.link-btn { background: none; border: 0; color: inherit; text-decoration: underline; font: inherit; padding: 8px 4px; min-height: 40px; cursor: pointer; }
