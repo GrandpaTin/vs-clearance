@@ -7,7 +7,7 @@ import {
   inventoryUrl, parseClearancePage, parseStores, parseInventory, todaysHours, isListingDespiteStatus
 } from '../public/core.js';
 
-/* global __VSX_CSS__ */
+/* global __VSX_CSS__, __VSX_VERSION__, __VSX_HOME__ */
 (function vsClearance() {
   if (window.__vsClearance) return;
   window.__vsClearance = true;
@@ -35,7 +35,7 @@ import {
     }
     if (!res.ok && !isListingDespiteStatus(res.status, data)) {
       throw new Error(res.status === 404
-        ? "Vitamin Shoppe's clearance search came back empty (404) — the site may have changed; check for a VS Clearance update."
+        ? "Vitamin Shoppe's clearance search came back empty (404) — the site may have changed. Tap “Update VS Clearance” at the bottom."
         : `Vitamin Shoppe answered ${res.status}.`);
     }
     return data;
@@ -90,7 +90,19 @@ import {
     try {
       const first = parseClearancePage(await getJson(clearanceUrl(1)));
       let raw = first.items;
-      for (let p = 2; p <= Math.min(first.totalPages, 25); p++) raw = raw.concat(parseClearancePage(await getJson(clearanceUrl(p))).items);
+      let partial = false;
+      for (let p = 2; p <= Math.min(first.totalPages, 25); p++) {
+        try {
+          const items = parseClearancePage(await getJson(clearanceUrl(p))).items;
+          if (!items.length) { partial = true; break; }
+          raw = raw.concat(items);
+        } catch (e) {
+          if (e instanceof Blocked) throw e;
+          partial = true; break;
+        }
+      }
+      // A cut-short list replaces the saved one only if it's nearly as complete.
+      if (partial && raw.length < 0.8 * state.raw.length) throw new Error('Vitamin Shoppe only sent part of the clearance list.');
       const seen = new Set();
       raw = raw.filter((o) => !seen.has(o.id) && seen.add(o.id));
       // Clearance is never really empty; an empty answer is a hiccup, so keep the saved list.
@@ -181,6 +193,7 @@ import {
     if (!q) { storeSearch.message = 'Enter a ZIP code or city to find stores.'; return renderSheet(); }
     if (/^\d+$/.test(q) && q.length !== 5) { storeSearch.message = 'ZIP codes have 5 digits.'; return renderSheet(); }
     storeSearch.searching = true; storeSearch.message = null; storeSearch.blocked = false; renderSheet();
+    put('storeQuery', q);
     try {
       const { stores, status } = parseStores(await getJson(storeSearchUrl(q)));
       storeSearch.results = stores;
@@ -223,7 +236,7 @@ import {
         <ul class="list" data-ref="list"></ul>
         <div class="status" data-ref="status" hidden></div>
         <div class="share-line" data-ref="shareLine" hidden></div>
-        <p class="foot-note"><button class="link-btn" data-act="hide-launcher">Hide the 🏷️ Deals button</button> · open again from vitaminshoppe.com/#vsdeals</p>
+        <p class="foot-note" data-ref="footNote"></p>
       </div>
       <div class="sheet-wrap" data-ref="sheetWrap" hidden><div class="sheet" data-ref="sheet" role="dialog" aria-modal="true"></div></div>
       <div class="toast" data-ref="toast" hidden></div>
@@ -236,11 +249,10 @@ import {
     state.open = true; app.hidden = false; launcher.hidden = true;
     document.documentElement.style.overflow = 'hidden';
     render();
-    const stale = !state.savedAt || Date.now() - state.savedAt > 10 * 60_000;
-    if (stale) loadDeals();
+    if (listIsOld()) loadDeals();
   }
-  // Like the Android app: a failed or old list refreshes when the connection or the tab comes back.
-  const listIsOld = () => !state.savedAt || Date.now() - state.savedAt > 30 * 60_000;
+  // One rule everywhere: a list older than 10 minutes refreshes on open, on reconnect and on return.
+  function listIsOld() { return !state.savedAt || Date.now() - state.savedAt > 10 * 60_000; }
   window.addEventListener('online', () => { if (state.open && (state.error || listIsOld())) loadDeals(); });
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible' && state.open && listIsOld()) loadDeals();
@@ -266,8 +278,16 @@ import {
     mode: state.mode, sort: state.sort, onlyIds: state.onlyChanges ? changeIds() : null
   });
 
+  function renderFootNote() {
+    const hidden = !get('launcher', true);
+    ref('footNote').innerHTML = `VS Clearance ${esc(__VSX_VERSION__)} · <a class="link-btn" href="${esc(__VSX_HOME__)}vs-clearance.user.js" target="_blank" rel="noopener">Update VS Clearance</a> · ` +
+      (hidden ? '<button class="link-btn" data-act="show-launcher">Show the 🏷️ Deals button</button>'
+        : '<button class="link-btn" data-act="hide-launcher">Hide the 🏷️ Deals button</button>');
+  }
+
   function render() {
     if (!state.open) return;
+    renderFootNote();
     renderShareLine();
     const n = changeIds().size;
     ref('subtitle').textContent = state.loading ? (state.items.length ? 'Refreshing…' : 'Loading live prices…')
@@ -276,7 +296,7 @@ import {
 
     const banner = ref('banner');
     if (state.blocked && state.items.length) {
-      banner.innerHTML = `<div class="banner warn"><span><b>Quick check needed.</b> Vitamin Shoppe wants to confirm a person is browsing. Close this, complete any check on the page (or reload it), then reopen Deals.</span>
+      banner.innerHTML = `<div class="banner warn"><span><b>Quick check needed.</b> Vitamin Shoppe wants to confirm a person is browsing. Close this, complete any check on the page (or reload it), then reopen Deals · showing deals from ${relativeTime(state.savedAt)}.</span>
         <button class="text-btn" data-act="reload-page">Reload page</button></div>`;
     } else if (state.error && state.items.length) {
       banner.innerHTML = `<div class="banner warn"><span><b>Couldn't refresh.</b> ${esc(state.error.replace(/\.$/, ''))} · showing deals from ${relativeTime(state.savedAt)}.</span><button class="text-btn" data-act="refresh">Retry</button></div>`;
@@ -304,6 +324,12 @@ import {
     if (state.mode === 'pickup' && state.stockLoading && !deals.length) {
       list.innerHTML = ''; status.hidden = false;
       status.innerHTML = statusHtml('🏬', 'Checking shelves…', `Looking up stock at ${esc(state.store.name)}.`);
+      return;
+    }
+    if (state.mode === 'pickup' && state.store && !hasStock() && !state.stockLoading) {
+      list.innerHTML = ''; status.hidden = false;
+      status.innerHTML = statusHtml('🏬', "Couldn't check shelves", `We couldn't get stock for ${esc(state.store.name)}.`,
+        [['Try again', state.blocked ? 'reload-page' : 'retry-stock', true], ['Show ship-to-home', 'ship']]);
       return;
     }
     if (!deals.length) { list.innerHTML = ''; status.hidden = false; status.innerHTML = noMatchesHtml(); return; }
@@ -445,8 +471,12 @@ import {
       case 'close': return closeApp();
       case 'refresh': return loadDeals();
       case 'retry-stock': return loadStock();
-      case 'reload-page': location.hash = 'vsdeals'; return location.reload();
-      case 'hide-launcher': put('launcher', false); closeApp(); return;
+      case 'reload-page':
+        // Back where they were after the check: the store sheet reopens (and searches) if it was open.
+        try { if (state.sheet === 'stores') sessionStorage.setItem('vsx.reopen', 'stores'); } catch { /* private mode */ }
+        location.hash = 'vsdeals'; return location.reload();
+      case 'hide-launcher': put('launcher', false); renderFootNote(); return toast('Deals button hidden — open again from vitaminshoppe.com/#vsdeals');
+      case 'show-launcher': put('launcher', true); renderFootNote(); return toast('Deals button is back');
       case 'mode':
         if (v === 'pickup' && !state.store) return openSheet('stores');
         return update(() => { state.mode = v; });
@@ -542,6 +572,9 @@ import {
     if (location.hash === '#vsdeals') put('launcher', true);
     launcher.hidden = !get('launcher', true);
     if (paired || location.hash === '#vsdeals') openApp();
+    let reopen = null;
+    try { reopen = sessionStorage.getItem('vsx.reopen'); sessionStorage.removeItem('vsx.reopen'); } catch { /* private mode */ }
+    if (reopen === 'stores' && state.open) openSheet('stores');
     if (paired && state.raw.length && state.savedAt && Date.now() - state.savedAt <= 10 * 60_000) publish();
   }
   mount();

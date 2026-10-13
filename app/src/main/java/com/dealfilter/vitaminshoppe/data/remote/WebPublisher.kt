@@ -109,6 +109,7 @@ class WebPublisher(
         serverUrl = prefs.getString(K_SRV_URL, "") ?: "",
         serverToken = prefs.getString(K_SRV_TOKEN, "") ?: "",
         lastPublishedAt = prefs.getLong(K_LAST, 0L).takeIf { it > 0 },
+        lastError = prefs.getString(K_ERROR, null),
         pending = prefs.getBoolean(K_PENDING, false)
     )
 
@@ -173,7 +174,9 @@ class WebPublisher(
         }
         val now = System.currentTimeMillis()
         val ok = outcome.error == null
-        prefs.edit().putBoolean(K_PENDING, outcome.retryLater).apply { if (ok) putLong(K_LAST, now) }.apply()
+        prefs.edit().putBoolean(K_PENDING, outcome.retryLater)
+            .putString(K_ERROR, if (outcome.retryLater) null else outcome.error)
+            .apply { if (ok) putLong(K_LAST, now) }.apply()
         _state.update {
             it.copy(
                 isPublishing = false,
@@ -299,6 +302,7 @@ class WebPublisher(
         private const val K_SRV_TOKEN = "srv_token"
         private const val K_LAST = "last"
         private const val K_PENDING = "pending"
+        private const val K_ERROR = "error"
 
         /** Same field names as the app's cache file, which the web app reads directly. */
         fun buildPayload(
@@ -312,7 +316,7 @@ class WebPublisher(
             .put("v", 1)
             .put("savedAt", savedAt)
             .apply { if (publishedAt != null) put("publishedAt", publishedAt) }
-            .put("items", JSONArray().apply { items.forEach { put(LocalStore.dealToJson(it)) } })
+            .put("items", JSONArray().apply { items.forEach { put(LocalStore.dealToJson(it.copy(storeQuantity = null))) } })
             .put("store", store?.let { LocalStore.storeToJson(it) } ?: JSONObject.NULL)
             .put("stockStoreId", stockStoreId ?: JSONObject.NULL)
             .put("stock", JSONObject().apply { stock.forEach { (k, v) -> put(k, v) } })

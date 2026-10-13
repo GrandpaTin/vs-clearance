@@ -102,6 +102,7 @@ import com.dealfilter.vitaminshoppe.ui.theme.NavyPrimary
 import com.dealfilter.vitaminshoppe.ui.theme.SkyBlueSecondary
 import com.dealfilter.vitaminshoppe.ui.viewmodel.DealActions
 import com.dealfilter.vitaminshoppe.ui.viewmodel.DealUiState
+import com.dealfilter.vitaminshoppe.data.remote.WebShareState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -248,8 +249,16 @@ fun DealScreenContent(state: DealUiState, viewModel: DealActions, modifier: Modi
                     actions = {
                         IconButton(onClick = viewModel::openWebShare) {
                             Icon(
-                                if (state.webShare.enabled && state.webShare.isConfigured) Icons.Default.CloudDone else Icons.Default.CloudUpload,
-                                contentDescription = if (state.webShare.enabled && state.webShare.isConfigured) "Share to web (on)" else "Share to web",
+                                when {
+                                    state.webShare.status == WebShareState.Status.ERROR -> Icons.Default.CloudOff
+                                    state.webShare.enabled && state.webShare.isConfigured -> Icons.Default.CloudDone
+                                    else -> Icons.Default.CloudUpload
+                                },
+                                contentDescription = when {
+                                    state.webShare.status == WebShareState.Status.ERROR -> "Share to web: needs attention"
+                                    state.webShare.enabled && state.webShare.isConfigured -> "Share to web (on)"
+                                    else -> "Share to web"
+                                },
                                 tint = Color.White
                             )
                         }
@@ -613,7 +622,8 @@ private fun Banners(state: DealUiState, viewModel: DealActions, now: Long) {
         if (release != null && downloading != null && !state.update.isDialogOpen) {
             Banner(
                 icon = Icons.Default.SystemUpdate,
-                text = "Downloading update ${release.versionName}… ${(downloading * 100).toInt()}%",
+                text = "Downloading update ${release.versionName}",
+                detail = "${(downloading * 100).toInt()}% — keep using the app; it installs when ready",
                 container = badges.skyBlueContainer,
                 content = badges.onSkyBlueContainer,
                 action = "Show",
@@ -677,14 +687,20 @@ private fun Banner(
         modifier = Modifier
             .fillMaxWidth()
             .padding(start = 12.dp, end = 12.dp, top = 12.dp)
-            // Screen readers announce a banner when it appears (refresh failed, update ready...).
-            .semantics(mergeDescendants = false) { liveRegion = LiveRegionMode.Polite }
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp)) {
             Icon(icon, contentDescription = null, tint = content, modifier = Modifier.size(20.dp))
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f).padding(vertical = 6.dp)) {
-                Text(text, style = MaterialTheme.typography.bodyMedium, color = content, fontWeight = if (detail != null) FontWeight.SemiBold else null)
+                // Only the title is a live region: TalkBack announces a banner once when it appears, not the
+                // "saved N minutes ago" clock or download percentage changing underneath it.
+                Text(
+                    text,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = content,
+                    fontWeight = if (detail != null) FontWeight.SemiBold else null,
+                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }
+                )
                 if (detail != null) Text(detail, style = MaterialTheme.typography.bodySmall, color = content)
             }
             TextButton(onClick = onAction) { Text(action, color = content, fontWeight = FontWeight.Bold) }

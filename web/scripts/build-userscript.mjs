@@ -38,6 +38,8 @@ const out = `${header}
 (() => {
 'use strict';
 const __VSX_CSS__ = ${JSON.stringify(css)};
+const __VSX_VERSION__ = ${JSON.stringify(version)};
+const __VSX_HOME__ = ${JSON.stringify(base + '/')};
 ${core}
 ${overlay}
 })();

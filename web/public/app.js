@@ -164,7 +164,8 @@ function renderHeader() {
   document.querySelector('.search').hidden = (!snap && !state.loading) || (!!snap && !state.items.length);
   const notice = !!snap && (!!state.error || Date.now() - (snap.savedAt || snap.publishedAt) > 36 * 3600e3);
   // One banner at a time: a stale or failed-update notice (which links to the app too) wins.
-  $('intro').hidden = !introWanted || (!snap && !state.loading) || (!!snap && !state.items.length) || notice;
+  $('intro').hidden = !introWanted || (!snap && !state.loading) || (!!snap && !state.items.length) || notice ||
+    !$('update-banner').hidden;
   if (snap) $('intro-text').innerHTML = hasStock()
     ? '<b>Clearance deals, shared with you.</b> Browse here, or <a href="get/">get the free app</a> to check <i>your</i> store.'
     : '<b>Clearance deals, shared with you.</b> Browse here, or <a href="get/">get the free app</a> for your store’s shelf stock.';
@@ -604,7 +605,7 @@ if ('serviceWorker' in navigator) {
     document.addEventListener('visibilitychange', check);
   }).catch(() => {});
   navigator.serviceWorker.addEventListener('controllerchange', () => {
-    if (hadWorker) { $('update-banner').hidden = false; $('banner').hidden = true; }
+    if (hadWorker) { $('update-banner').hidden = false; renderHeader(); }
     hadWorker = true; // the first worker taking over isn't news; the next one is
   });
 }

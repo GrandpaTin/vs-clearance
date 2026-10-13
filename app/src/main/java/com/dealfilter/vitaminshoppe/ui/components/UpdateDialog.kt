@@ -22,7 +22,7 @@ import com.dealfilter.vitaminshoppe.data.update.UpdateState
 
 /** Release notes as plain lines: Markdown bullets and headings read fine without the markup. */
 fun plainNotes(notes: String): String =
-    notes.lines().joinToString("\n") { it.trim().removePrefix("#").removePrefix("#").trim().replace(Regex("^[-*] "), "• ") }
+    notes.lines().joinToString("\n") { it.trim().replace(Regex("^#+\\s*"), "").replace(Regex("^[-*] "), "• ") }
         .replace(Regex("\n{3,}"), "\n\n").trim()
 
 @Composable

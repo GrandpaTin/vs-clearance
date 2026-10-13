@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         VS Clearance — Vitamin Shoppe deal finder
 // @namespace    vs-clearance
-// @version      3.1.1.40
+// @version      3.1.1.41
 // @description  Every Vitamin Shoppe clearance deal with real cart prices, your store's shelf stock, filters, and an AI review prompt.
 // @match        https://www.vitaminshoppe.com/*
 // @run-at       document-idle
@@ -16,6 +16,8 @@
 (() => {
 'use strict';
 const __VSX_CSS__ = ":host {\n  --navy: #012169; --navy-dark: #001540; --sky: #15BEF0;\n  --bg: #F8FAFC; --surface: #FFFFFF; --surface-2: #F1F5F9; --text: #0F172A; --muted: #64748B;\n  --outline: #CBD5E1; --hairline: #E2E8F0; --price: #047857; --em-bg: #D1FAE5; --em-fg: #065F46;\n  --sky-bg: #E0F2FE; --sky-fg: #0369A1; --amber-bg: #FEF3C7; --amber-fg: #92400E; --red-bg: #FEE2E2; --red-fg: #991B1B;\n  --header: var(--navy); --search: var(--navy-dark); --link: var(--navy);\n}\n@media (prefers-color-scheme: dark) {\n  :host {\n    --bg: #0B1120; --surface: #111827; --surface-2: #1E293B; --text: #F8FAFC; --muted: #94A3B8;\n    --outline: #334155; --hairline: #1F2A3C; --price: #34D399; --em-bg: #064E3B; --em-fg: #A7F3D0;\n    --sky-bg: #0C4A6E; --sky-fg: #BAE6FD; --amber-bg: #451A03; --amber-fg: #FCD34D; --red-bg: #7F1D1D; --red-fg: #FECACA;\n    --header: var(--navy-dark); --search: #1E293B; --link: var(--sky);\n  }\n}\n* { box-sizing: border-box; }\n[hidden] { display: none !important; }\nbutton { font: inherit; color: inherit; cursor: pointer; }\n:focus-visible { outline: 3px solid var(--sky); outline-offset: 2px; }\n.vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }\n.muted { color: var(--muted); margin: 0; }\n.err { color: var(--red-fg); margin: 0; }\n\n.launcher {\n  position: fixed; left: 16px; bottom: calc(16px + env(safe-area-inset-bottom)); z-index: 2147483646;\n  display: flex; align-items: center; gap: 6px; border: 0; border-radius: 999px; padding: 0 20px; min-height: 52px;\n  background: linear-gradient(135deg, #34D399, #047857); color: #fff; font: 700 17px/1 system-ui, -apple-system, sans-serif;\n  box-shadow: 0 8px 24px rgba(0,0,0,.3);\n}\n\n.app {\n  position: fixed; inset: 0; z-index: 2147483647; display: flex; flex-direction: column;\n  background: var(--bg); color: var(--text); font: 16px/1.4 system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif;\n  -webkit-text-size-adjust: 100%;\n}\n.top { background: var(--header); color: #fff; padding: calc(env(safe-area-inset-top) + 10px) 16px 12px; flex: none; }\n.top-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; max-width: 900px; margin: 0 auto; }\n.top-actions { display: flex; }\nh1 { font-size: 1.35rem; margin: 0; }\n.subtitle { margin: 2px 0 0; font-size: .85rem; opacity: .85; }\n.icon-btn { background: transparent; border: 0; border-radius: 50%; width: 44px; height: 44px; display: grid; place-items: center; font-size: 20px; }\n.icon-btn.on-dark { color: #fff; }\n.icon-btn.spin { animation: spin 1s linear infinite; }\n@keyframes spin { to { transform: rotate(360deg); } }\n.search { display: flex; align-items: center; gap: 8px; background: var(--search); border-radius: 12px; padding: 0 12px; margin: 10px auto 0; max-width: 900px; min-height: 50px; }\n.search input { flex: 1; min-width: 0; background: transparent; border: 0; color: #fff; font-size: 16px; padding: 12px 0; }\n.search input::placeholder { color: rgba(255,255,255,.7); }\n.search input:focus { outline: none; }\n\n.scroll { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding-bottom: calc(32px + env(safe-area-inset-bottom)); }\n.scroll > * { max-width: 900px; margin-left: auto; margin-right: auto; }\n.banner { display: flex; align-items: center; gap: 10px; margin: 12px; border-radius: 12px; padding: 8px 8px 8px 14px; }\n.banner span { flex: 1; }\n.banner.warn { background: var(--amber-bg); color: var(--amber-fg); }\n.banner.bad { background: var(--red-bg); color: var(--red-fg); }\n.text-btn { background: none; border: 0; font-weight: 700; padding: 10px 12px; min-height: 44px; border-radius: 8px; }\n\n.controls { padding: 12px 12px 4px; }\n.segmented { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--outline); border-radius: 999px; overflow: hidden; }\n.segmented button { background: transparent; border: 0; min-height: 44px; font-weight: 600; }\n.segmented button + button { border-left: 1px solid var(--outline); }\n.segmented button[aria-checked=\"true\"] { background: var(--sky-bg); color: var(--sky-fg); }\n.segmented button[aria-checked=\"true\"]::before { content: \"✓ \"; }\n.store-row { display: flex; align-items: center; gap: 10px; width: 100%; margin-top: 8px; padding: 8px 12px; min-height: 52px;\n  background: var(--surface-2); border: 0; border-radius: 12px; text-align: left; }\n.store-text { flex: 1; display: flex; flex-direction: column; }\n.store-text small { color: var(--muted); }\n.chips { display: flex; gap: 8px; overflow-x: auto; padding: 8px 2px 0; scrollbar-width: none; }\n.chips::-webkit-scrollbar { display: none; }\n.chip { flex: none; border: 1px solid var(--outline); background: transparent; border-radius: 8px; min-height: 36px; padding: 6px 14px; font-weight: 600; color: var(--muted); white-space: nowrap; }\n.chip[aria-pressed=\"true\"] { background: var(--sky-bg); color: var(--sky-fg); border-color: transparent; }\n.chip[aria-pressed=\"true\"]::before { content: \"✓ \"; }\n.chip.clear::after { content: \" ✕\"; }\n\n.summary { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 8px; background: var(--bg); padding: 10px 12px 8px 16px; border-bottom: 1px solid var(--hairline); }\n.count { flex: 1 0 auto; font-weight: 700; white-space: nowrap; }\n.tonal-btn { display: inline-flex; align-items: center; gap: 6px; background: var(--sky-bg); color: var(--sky-fg); border: 0; border-radius: 999px; min-height: 40px; padding: 0 12px; font-weight: 700; white-space: nowrap; }\n.tonal-btn.wide { justify-content: center; }\n.sort select { background: transparent; color: var(--link); border: 0; font: inherit; font-weight: 700; min-height: 40px; max-width: 36vw; text-overflow: ellipsis; }\n\n.list { list-style: none; margin: 0 auto; padding: 8px 12px; display: grid; gap: 8px; }\n@media (min-width: 760px) { .list { grid-template-columns: 1fr 1fr; } }\n.card { background: var(--surface); border: 1px solid var(--hairline); border-radius: 16px; display: grid; grid-template-columns: 88px 1fr; gap: 12px; padding: 12px 6px 6px 12px; }\n.thumb { width: 88px; height: 88px; border-radius: 12px; border: 1px solid var(--hairline); background: #fff; display: grid; place-items: center; overflow: hidden; text-decoration: none; font-size: 32px; }\n.thumb.none { background: var(--surface-2); }\n.thumb img { width: 82px; height: 82px; object-fit: contain; padding: 4px; }\n.body { min-width: 0; display: flex; flex-direction: column; gap: 4px; }\n.brandline { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }\n.brand { font-size: .75rem; letter-spacing: .06em; font-weight: 800; color: var(--link); text-transform: uppercase; }\n.title { font-weight: 600; color: var(--text); text-decoration: none; padding-right: 8px;\n  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }\n.prices { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }\n.price { font-size: 1.35rem; font-weight: 800; color: var(--price); }\n.was { color: var(--muted); text-decoration: line-through; }\n.tag { font-size: .75rem; font-weight: 800; border-radius: 6px; padding: 2px 6px; }\n.tag.off, .tag.drop { background: var(--em-bg); color: var(--em-fg); }\n.tag.new { background: var(--sky-bg); color: var(--sky-fg); }\n.note { font-size: .85rem; color: var(--muted); }\n.pills { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }\n.pill { background: var(--surface-2); color: var(--muted); font-size: .8rem; border-radius: 6px; padding: 2px 6px; }\n.rating { font-size: .85rem; color: var(--muted); }\n.foot { display: flex; align-items: center; min-height: 44px; }\n.stock { flex: 1; display: flex; align-items: center; gap: 6px; font-size: .9rem; font-weight: 500; }\n.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--outline); flex: none; }\n.dot.good { background: var(--em-fg); }\n.dot.bad { background: var(--red-fg); }\n.foot .icon-btn { color: var(--muted); }\n\n.status { text-align: center; padding: 40px 28px; display: grid; justify-items: center; gap: 8px; }\n.badge { width: 88px; height: 88px; border-radius: 50%; display: grid; place-items: center; background: var(--sky-bg); font-size: 40px; }\n.status h2 { margin: 8px 0 0; font-size: 1.15rem; }\n.status p { margin: 0; color: var(--muted); max-width: 460px; }\n.actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 8px; }\n.primary-btn { background: var(--navy); color: #fff; border: 0; border-radius: 999px; min-height: 44px; padding: 0 20px; font-weight: 700; }\n@media (prefers-color-scheme: dark) { .primary-btn { background: var(--sky); color: var(--navy-dark); } }\n.outline-btn { background: transparent; border: 1px solid var(--outline); border-radius: 999px; min-height: 44px; padding: 0 18px; font-weight: 700; }\n.skeleton { height: 140px; border-radius: 16px; background: linear-gradient(90deg, var(--surface-2), var(--surface), var(--surface-2)); background-size: 200% 100%; animation: shimmer 1.4s infinite; }\n@keyframes shimmer { to { background-position: -200% 0; } }\n@media (prefers-reduced-motion: reduce) { .skeleton, .icon-btn.spin { animation: none; } }\n\n.sheet-wrap { position: absolute; inset: 0; background: rgba(0,0,0,.5); display: flex; align-items: flex-end; justify-content: center; z-index: 5; }\n.sheet { background: var(--surface); color: var(--text); width: 100%; max-width: 720px; max-height: 88%; overflow-y: auto;\n  border-radius: 20px 20px 0 0; padding: 20px 16px calc(16px + env(safe-area-inset-bottom)); display: grid; gap: 12px; }\n@media (min-width: 760px) { .sheet-wrap { align-items: center; } .sheet { border-radius: 20px; } }\n.sheet h2 { margin: 0; font-size: 1.25rem; }\n.store-form { display: flex; gap: 8px; }\n.store-form input { flex: 1; min-width: 0; font-size: 16px; padding: 12px; border: 1px solid var(--outline); border-radius: 12px; background: var(--surface); color: var(--text); }\n.stores { display: grid; gap: 8px; }\n.store { display: flex; gap: 8px; text-align: left; background: var(--surface-2); border: 2px solid transparent; border-radius: 12px; padding: 12px; }\n.store.selected { background: var(--sky-bg); border-color: var(--sky-fg); }\n.store[aria-disabled=\"true\"] { opacity: .7; }\n.store-main { flex: 1; display: flex; flex-direction: column; }\n.store-main span, .store-main small { color: var(--muted); }\n.store-main small.err { color: var(--red-fg); }\n.dist { color: var(--link); font-weight: 700; white-space: nowrap; }\n.scope { background: var(--sky-bg); color: var(--sky-fg); border-radius: 12px; padding: 12px; }\n.scope b { display: block; }\n.sheet-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }\n.sheet-actions button { min-height: 48px; }\ndetails summary { cursor: pointer; font-weight: 700; min-height: 44px; display: flex; align-items: center; }\npre { white-space: pre-wrap; background: var(--surface-2); border-radius: 12px; padding: 12px; max-height: 300px; overflow: auto; font-size: 12px; margin: 0; }\n.close { justify-self: end; }\n.toast { position: absolute; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom)); transform: translateX(-50%); background: #1E293B; color: #fff; padding: 12px 18px; border-radius: 12px; max-width: calc(100% - 32px); z-index: 6; }\n\n.share-line { display: flex; align-items: center; gap: 4px; margin: 0 12px 12px; padding: 4px 4px 4px 14px; border-radius: 12px; background: var(--surface-2); color: var(--muted); font-size: .9rem; }\n.share-line span { flex: 1; }\n.share-line a { color: var(--link); text-decoration: none; }\n\n.foot-note { text-align: center; color: var(--muted); font-size: .8rem; padding: 4px 16px 24px; }\n.link-btn { background: none; border: 0; color: inherit; text-decoration: underline; font: inherit; padding: 8px 4px; min-height: 40px; cursor: pointer; }\n";
+const __VSX_VERSION__ = "3.1.1.41";
+const __VSX_HOME__ = "https://dn.tail59aab8.ts.net:10000/";
 // Pure deal logic shared by the web app and its tests. Mirrors the Android app's
 // DealItem / DealFilters / AiPrompt so both show identical prices and orderings.
 
@@ -501,7 +503,7 @@ function todaysHours(lines, date = new Date()) {
     }
     if (!res.ok && !isListingDespiteStatus(res.status, data)) {
       throw new Error(res.status === 404
-        ? "Vitamin Shoppe's clearance search came back empty (404) — the site may have changed; check for a VS Clearance update."
+        ? "Vitamin Shoppe's clearance search came back empty (404) — the site may have changed. Tap “Update VS Clearance” at the bottom."
         : `Vitamin Shoppe answered ${res.status}.`);
     }
     return data;
@@ -556,7 +558,19 @@ function todaysHours(lines, date = new Date()) {
     try {
       const first = parseClearancePage(await getJson(clearanceUrl(1)));
       let raw = first.items;
-      for (let p = 2; p <= Math.min(first.totalPages, 25); p++) raw = raw.concat(parseClearancePage(await getJson(clearanceUrl(p))).items);
+      let partial = false;
+      for (let p = 2; p <= Math.min(first.totalPages, 25); p++) {
+        try {
+          const items = parseClearancePage(await getJson(clearanceUrl(p))).items;
+          if (!items.length) { partial = true; break; }
+          raw = raw.concat(items);
+        } catch (e) {
+          if (e instanceof Blocked) throw e;
+          partial = true; break;
+        }
+      }
+      // A cut-short list replaces the saved one only if it's nearly as complete.
+      if (partial && raw.length < 0.8 * state.raw.length) throw new Error('Vitamin Shoppe only sent part of the clearance list.');
       const seen = new Set();
       raw = raw.filter((o) => !seen.has(o.id) && seen.add(o.id));
       // Clearance is never really empty; an empty answer is a hiccup, so keep the saved list.
@@ -647,6 +661,7 @@ function todaysHours(lines, date = new Date()) {
     if (!q) { storeSearch.message = 'Enter a ZIP code or city to find stores.'; return renderSheet(); }
     if (/^\d+$/.test(q) && q.length !== 5) { storeSearch.message = 'ZIP codes have 5 digits.'; return renderSheet(); }
     storeSearch.searching = true; storeSearch.message = null; storeSearch.blocked = false; renderSheet();
+    put('storeQuery', q);
     try {
       const { stores, status } = parseStores(await getJson(storeSearchUrl(q)));
       storeSearch.results = stores;
@@ -689,7 +704,7 @@ function todaysHours(lines, date = new Date()) {
         <ul class="list" data-ref="list"></ul>
         <div class="status" data-ref="status" hidden></div>
         <div class="share-line" data-ref="shareLine" hidden></div>
-        <p class="foot-note"><button class="link-btn" data-act="hide-launcher">Hide the 🏷️ Deals button</button> · open again from vitaminshoppe.com/#vsdeals</p>
+        <p class="foot-note" data-ref="footNote"></p>
       </div>
       <div class="sheet-wrap" data-ref="sheetWrap" hidden><div class="sheet" data-ref="sheet" role="dialog" aria-modal="true"></div></div>
       <div class="toast" data-ref="toast" hidden></div>
@@ -702,11 +717,10 @@ function todaysHours(lines, date = new Date()) {
     state.open = true; app.hidden = false; launcher.hidden = true;
     document.documentElement.style.overflow = 'hidden';
     render();
-    const stale = !state.savedAt || Date.now() - state.savedAt > 10 * 60_000;
-    if (stale) loadDeals();
+    if (listIsOld()) loadDeals();
   }
-  // Like the Android app: a failed or old list refreshes when the connection or the tab comes back.
-  const listIsOld = () => !state.savedAt || Date.now() - state.savedAt > 30 * 60_000;
+  // One rule everywhere: a list older than 10 minutes refreshes on open, on reconnect and on return.
+  function listIsOld() { return !state.savedAt || Date.now() - state.savedAt > 10 * 60_000; }
   window.addEventListener('online', () => { if (state.open && (state.error || listIsOld())) loadDeals(); });
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible' && state.open && listIsOld()) loadDeals();
@@ -732,8 +746,16 @@ function todaysHours(lines, date = new Date()) {
     mode: state.mode, sort: state.sort, onlyIds: state.onlyChanges ? changeIds() : null
   });
 
+  function renderFootNote() {
+    const hidden = !get('launcher', true);
+    ref('footNote').innerHTML = `VS Clearance ${esc(__VSX_VERSION__)} · <a class="link-btn" href="${esc(__VSX_HOME__)}vs-clearance.user.js" target="_blank" rel="noopener">Update VS Clearance</a> · ` +
+      (hidden ? '<button class="link-btn" data-act="show-launcher">Show the 🏷️ Deals button</button>'
+        : '<button class="link-btn" data-act="hide-launcher">Hide the 🏷️ Deals button</button>');
+  }
+
   function render() {
     if (!state.open) return;
+    renderFootNote();
     renderShareLine();
     const n = changeIds().size;
     ref('subtitle').textContent = state.loading ? (state.items.length ? 'Refreshing…' : 'Loading live prices…')
@@ -742,7 +764,7 @@ function todaysHours(lines, date = new Date()) {
 
     const banner = ref('banner');
     if (state.blocked && state.items.length) {
-      banner.innerHTML = `<div class="banner warn"><span><b>Quick check needed.</b> Vitamin Shoppe wants to confirm a person is browsing. Close this, complete any check on the page (or reload it), then reopen Deals.</span>
+      banner.innerHTML = `<div class="banner warn"><span><b>Quick check needed.</b> Vitamin Shoppe wants to confirm a person is browsing. Close this, complete any check on the page (or reload it), then reopen Deals · showing deals from ${relativeTime(state.savedAt)}.</span>
         <button class="text-btn" data-act="reload-page">Reload page</button></div>`;
     } else if (state.error && state.items.length) {
       banner.innerHTML = `<div class="banner warn"><span><b>Couldn't refresh.</b> ${esc(state.error.replace(/\.$/, ''))} · showing deals from ${relativeTime(state.savedAt)}.</span><button class="text-btn" data-act="refresh">Retry</button></div>`;
@@ -770,6 +792,12 @@ function todaysHours(lines, date = new Date()) {
     if (state.mode === 'pickup' && state.stockLoading && !deals.length) {
       list.innerHTML = ''; status.hidden = false;
       status.innerHTML = statusHtml('🏬', 'Checking shelves…', `Looking up stock at ${esc(state.store.name)}.`);
+      return;
+    }
+    if (state.mode === 'pickup' && state.store && !hasStock() && !state.stockLoading) {
+      list.innerHTML = ''; status.hidden = false;
+      status.innerHTML = statusHtml('🏬', "Couldn't check shelves", `We couldn't get stock for ${esc(state.store.name)}.`,
+        [['Try again', state.blocked ? 'reload-page' : 'retry-stock', true], ['Show ship-to-home', 'ship']]);
       return;
     }
     if (!deals.length) { list.innerHTML = ''; status.hidden = false; status.innerHTML = noMatchesHtml(); return; }
@@ -911,8 +939,12 @@ function todaysHours(lines, date = new Date()) {
       case 'close': return closeApp();
       case 'refresh': return loadDeals();
       case 'retry-stock': return loadStock();
-      case 'reload-page': location.hash = 'vsdeals'; return location.reload();
-      case 'hide-launcher': put('launcher', false); closeApp(); return;
+      case 'reload-page':
+        // Back where they were after the check: the store sheet reopens (and searches) if it was open.
+        try { if (state.sheet === 'stores') sessionStorage.setItem('vsx.reopen', 'stores'); } catch { /* private mode */ }
+        location.hash = 'vsdeals'; return location.reload();
+      case 'hide-launcher': put('launcher', false); renderFootNote(); return toast('Deals button hidden — open again from vitaminshoppe.com/#vsdeals');
+      case 'show-launcher': put('launcher', true); renderFootNote(); return toast('Deals button is back');
       case 'mode':
         if (v === 'pickup' && !state.store) return openSheet('stores');
         return update(() => { state.mode = v; });
@@ -1008,6 +1040,9 @@ function todaysHours(lines, date = new Date()) {
     if (location.hash === '#vsdeals') put('launcher', true);
     launcher.hidden = !get('launcher', true);
     if (paired || location.hash === '#vsdeals') openApp();
+    let reopen = null;
+    try { reopen = sessionStorage.getItem('vsx.reopen'); sessionStorage.removeItem('vsx.reopen'); } catch { /* private mode */ }
+    if (reopen === 'stores' && state.open) openSheet('stores');
     if (paired && state.raw.length && state.savedAt && Date.now() - state.savedAt <= 10 * 60_000) publish();
   }
   mount();

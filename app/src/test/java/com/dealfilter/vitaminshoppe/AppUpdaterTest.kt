@@ -42,5 +42,6 @@ class AppUpdaterTest {
     @Test
     fun `notes read cleanly without Markdown`() {
         assertEquals("What's new\n• Lists refresh again\n• Updates install in-app", plainNotes("## What's new\n- Lists refresh again\n* Updates install in-app\n\n\n"))
+        assertEquals("Fixes", plainNotes("### Fixes"))
     }
 }

@@ -46,6 +46,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import com.dealfilter.vitaminshoppe.data.remote.WebPublisher
 import com.dealfilter.vitaminshoppe.data.remote.WebShareState
 import com.dealfilter.vitaminshoppe.ui.viewmodel.ago
 
@@ -80,8 +81,8 @@ fun WebShareSheet(
     var server by rememberSaveable { mutableStateOf(share.serverUrl) }
     var serverToken by rememberSaveable { mutableStateOf(share.serverToken) }
     var showServer by rememberSaveable { mutableStateOf(share.serverUrl.isNotBlank() && !share.hasGitHub) }
-    val dirty = repo.trim() != share.gitHubRepo.removePrefix("https://") || repoToken.trim() != share.gitHubToken ||
-        server.trim().removePrefix("https://") != share.serverUrl.removePrefix("https://") || serverToken.trim() != share.serverToken
+    val dirty = WebPublisher.normalizeUrl(repo) != share.gitHubRepo || repoToken.trim() != share.gitHubToken ||
+        WebPublisher.normalizeUrl(server) != share.serverUrl || serverToken.trim() != share.serverToken
     val canPublish = (repo.isNotBlank() && repoToken.isNotBlank()) || (server.isNotBlank() && serverToken.isNotBlank())
     val now = System.currentTimeMillis()
 

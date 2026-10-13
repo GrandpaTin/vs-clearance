@@ -1,6 +1,6 @@
 // Network first for everything (deals and shell); the cache is the offline fallback.
 const VERSION = 'vs-web-5';
-const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'core.js', 'manifest.webmanifest', 'get/', 'get/landing.js',
+const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'core.js', 'boot-check.js', 'manifest.webmanifest', 'get/', 'get/landing.js',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'];
 
 self.addEventListener('install', (e) => {
@@ -17,9 +17,7 @@ self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET' || url.origin !== self.location.origin) return;
   if (url.pathname.endsWith('/api/snapshot')) {
-    // Revalidate with the server (GitHub Pages lets browsers keep files 10 minutes), so a new page
-  // never runs with the previous version's scripts.
-  e.respondWith(fetch(e.request, { cache: 'no-cache' }).then((res) => {
+    e.respondWith(fetch(e.request).then((res) => {
       if (res.ok) { const copy = res.clone(); caches.open(VERSION).then((c) => c.put('api/snapshot', copy)); }
       return res;
     }).catch(() => caches.match('api/snapshot').then((r) => {
@@ -32,8 +30,9 @@ self.addEventListener('fetch', (e) => {
     return;
   }
   // Shell: network first so a fix reaches everyone on their next visit; the cache is only the
-  // offline fallback.
-  e.respondWith(fetch(e.request).then((res) => {
+  // offline fallback. Revalidated with the server (GitHub Pages lets browsers keep files 10 minutes),
+  // so a new page never runs with the previous version's scripts.
+  e.respondWith(fetch(e.request, { cache: 'no-cache' }).then((res) => {
     if (res.ok) { const copy = res.clone(); caches.open(VERSION).then((c) => c.put(e.request, copy)); }
     return res;
   }).catch(() => caches.match(e.request, { ignoreSearch: true }).then((r) =>

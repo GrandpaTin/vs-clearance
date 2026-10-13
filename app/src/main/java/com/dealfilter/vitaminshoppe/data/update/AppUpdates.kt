@@ -15,6 +15,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -94,6 +96,12 @@ open class AppUpdater(
         val result = withContext(Dispatchers.IO) { runCatching { fetchLatest() } }
         // Only a check that got an answer counts; an offline morning mustn't silence it for a day.
         if (result.isSuccess) prefs.edit().putLong(K_CHECKED, now).putString(K_RELEASE, result.getOrNull()?.second).apply()
+        if (result.isFailure) {
+            // Offline or GitHub hiccup: keep any update already found (and its download) as it is.
+            _state.update { it.copy(isChecking = false) }
+            return@withLock if (result.exceptionOrNull() is IOException) "Couldn't check for updates — you're offline." else "Couldn't check for updates right now."
+        }
+        withContext(Dispatchers.IO) { deleteStaleDownload() }
         val release = result.getOrNull()?.first
         val newer = release?.takeIf { it.versionCode > currentVersionCode }
         val dismissedCode = prefs.getInt(K_DISMISSED, 0)
@@ -106,7 +114,6 @@ open class AppUpdater(
             )
         }
         when {
-            result.isFailure -> if (result.exceptionOrNull() is IOException) "Couldn't check for updates — you're offline." else "Couldn't check for updates right now."
             newer != null -> null // the banner / dialog says it
             else -> "You're up to date (version ${BuildConfig.VERSION_NAME})."
         }
@@ -122,7 +129,9 @@ open class AppUpdater(
 
     fun startDownloadAndInstall() {
         if (downloadJob?.isActive == true) return
-        downloadJob = scope.launch { downloadAndInstall() }
+        val previous = downloadJob
+        // A cancelled download may still be blocked in a read; let it finish deleting its file first.
+        downloadJob = scope.launch { previous?.cancelAndJoin(); downloadAndInstall() }
     }
 
     fun cancelDownload() {
@@ -133,7 +142,7 @@ open class AppUpdater(
     /** Downloads (unless a verified copy is already here), verifies, then opens Android's installer. */
     suspend fun downloadAndInstall() {
         val release = _state.value.available ?: return
-        val haveFile = withContext(Dispatchers.IO) { apkFile.exists() && verifyMatchesInstalledApp(apkFile, release) == null }
+        val haveFile = withContext(Dispatchers.IO) { apkFile.exists() && verifyMatchesInstalledApp(apkFile, release, exact = true) == null }
         if (!haveFile) {
             _state.update { it.copy(progress = 0f, error = null, needsInstallPermission = false, readyToInstall = false) }
             try {
@@ -233,7 +242,7 @@ open class AppUpdater(
                             done += n
                             if (total > 0) {
                                 val p = (done.toFloat() / total).coerceIn(0f, 1f)
-                                if (p - lastShown >= 0.02f) { lastShown = p; _state.update { it.copy(progress = p) } }
+                                if (p - lastShown >= 0.02f && coroutineContext.isActive) { lastShown = p; _state.update { it.copy(progress = p) } }
                             }
                         }
                     }
@@ -256,8 +265,22 @@ open class AppUpdater(
         }
     }
 
-    /** Same app, newer version, signed with the same key: anything else would fail to install anyway. */
-    private fun verifyMatchesInstalledApp(apk: File, release: AppRelease): String? {
+    /** A download that's already installed (or older) is just taking up space. */
+    private fun deleteStaleDownload() {
+        val f = apkFile
+        if (!f.exists()) return
+        @Suppress("DEPRECATION")
+        val code = context.packageManager.getPackageArchiveInfo(f.path, 0)?.let {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) it.longVersionCode.toInt() else it.versionCode
+        }
+        if (code == null || code <= currentVersionCode) f.delete()
+    }
+
+    /**
+     * Same app, newer version, signed with the same key: anything else would fail to install anyway.
+     * With [exact], it must also be this very release (an older cached download isn't reused).
+     */
+    private fun verifyMatchesInstalledApp(apk: File, release: AppRelease, exact: Boolean = false): String? {
         val pm = context.packageManager
         val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) PackageManager.GET_SIGNING_CERTIFICATES else @Suppress("DEPRECATION") PackageManager.GET_SIGNATURES
         val downloaded = pm.getPackageArchiveInfo(apk.path, flags) ?: return "The downloaded file isn't a valid app. Try again."
@@ -265,6 +288,7 @@ open class AppUpdater(
         @Suppress("DEPRECATION")
         val code = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) downloaded.longVersionCode.toInt() else downloaded.versionCode
         if (code <= currentVersionCode) return "That download isn't newer than this app."
+        if (exact && code != release.versionCode) return "An older download is cached."
         val installed = pm.getPackageInfo(context.packageName, flags)
         if (signers(downloaded) != signers(installed)) {
             return "This update is signed with a different key than the app on your phone. " +
