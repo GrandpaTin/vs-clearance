@@ -120,6 +120,7 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
     /** The app came into view: refresh if the list is missing or older than [STALE_AFTER_MS]. */
     fun onAppForeground() {
         inForeground = true
+        updater.inForeground = true
         updater.onReturnedToApp()
         viewModelScope.launch {
             restoreJob.join()
@@ -132,6 +133,7 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
 
     fun onAppBackground() {
         inForeground = false
+        updater.inForeground = false
         autoRetryJob?.cancel()
     }
 
@@ -149,7 +151,9 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
         // Let the new connection settle; the first requests on a just-joined network often fail.
         delay(1_500)
         val s = _uiState.value
-        if (inForeground && (s.loadErrorIsOffline || isRefreshDue(System.currentTimeMillis()))) refreshInternal(auto = true)
+        val now = System.currentTimeMillis()
+        val offlineRetry = s.loadErrorIsOffline && !s.isVerificationVisible && now - verificationDeclinedAt >= STALE_AFTER_MS
+        if (inForeground && (offlineRetry || isRefreshDue(now))) refreshInternal(auto = true)
         // A list that couldn't be shared earlier goes out now (a refresh above publishes it anyway).
         val share = publisher.state.value
         if (share.pending && share.enabled && loadJob?.isActive != true) publishCurrent(announce = false)

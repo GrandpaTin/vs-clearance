@@ -26,12 +26,12 @@ import {
     } catch {
       throw new Error(navigator.onLine === false ? "You're offline." : "Couldn't reach vitaminshoppe.com.");
     }
-    if (res.status === 403) throw new Blocked('Vitamin Shoppe wants to confirm you\'re not a bot.');
+    if (res.status === 403) throw new Blocked('Vitamin Shoppe wants to confirm a person is browsing.');
     if (!res.ok && res.status !== 404) throw new Error(`Vitamin Shoppe answered ${res.status}.`);
     let data;
     try { data = await res.json(); } catch {
       if (!res.ok) throw new Error(`Vitamin Shoppe answered ${res.status}.`);
-      throw new Blocked('Vitamin Shoppe sent a check page instead of data.');
+      throw new Blocked('Vitamin Shoppe wants to confirm a person is browsing.');
     }
     if (!res.ok && !isListingDespiteStatus(res.status, data)) {
       throw new Error(res.status === 404
@@ -86,7 +86,7 @@ import {
 
   async function loadDeals() {
     if (state.loading) return;
-    state.loading = true; state.error = null; state.blocked = false; render();
+    state.loading = true; state.error = null; state.blocked = false; state.partialNote = null; render();
     try {
       const first = parseClearancePage(await getJson(clearanceUrl(1)));
       let raw = first.items;
@@ -103,6 +103,7 @@ import {
       }
       // A cut-short list replaces the saved one only if it's nearly as complete.
       if (partial && raw.length < 0.8 * state.raw.length) throw new Error('Vitamin Shoppe only sent part of the clearance list.');
+      state.partialNote = partial ? `Vitamin Shoppe only sent part of the list (${raw.length} of about ${first.total}).` : null;
       const seen = new Set();
       raw = raw.filter((o) => !seen.has(o.id) && seen.add(o.id));
       // Clearance is never really empty; an empty answer is a hiccup, so keep the saved list.
@@ -130,7 +131,7 @@ import {
     const store = state.store;
     if (!store || !state.raw.length) return;
     const run = ++stockRun;
-    state.stockLoading = true; state.stockError = null; render();
+    state.stockLoading = true; state.stockError = null; state.stockBlocked = false; render();
     try {
       const skus = [...new Set(state.raw.map((o) => o.jda).filter(Boolean))];
       const map = {};
@@ -144,7 +145,12 @@ import {
       rebuild();
       publish();
     } catch (e) {
-      if (run === stockRun) { state.stockError = `Couldn't check shelves at ${store.name}. ${e.message}`; state.blocked = e instanceof Blocked; }
+      if (run === stockRun) {
+        state.stockBlocked = e instanceof Blocked;
+        state.stockError = state.stockBlocked
+          ? `Quick check needed to read shelf stock at ${store.name}. Tap Reload page, complete any check, and Deals reopens.`
+          : `Couldn't check shelves at ${store.name}. ${e.message}`;
+      }
     } finally {
       if (run === stockRun) { state.stockLoading = false; render(); }
     }
@@ -216,7 +222,7 @@ import {
   const root = host.attachShadow({ mode: 'open' });
   root.innerHTML = `<style>${__VSX_CSS__}</style>
     <button class="launcher" part="launcher" aria-label="Open VS Clearance deals">🏷️ <span>Deals</span></button>
-    <div class="app" hidden role="dialog" aria-modal="true" aria-label="VS Clearance">
+    <div class="app" hidden role="dialog" aria-modal="true" aria-label="VS Clearance" tabindex="-1">
       <header class="top">
         <div class="top-row">
           <div><h1>Clearance Deals</h1><p class="subtitle" data-ref="subtitle"></p></div>
@@ -249,13 +255,20 @@ import {
     state.open = true; app.hidden = false; launcher.hidden = true;
     document.documentElement.style.overflow = 'hidden';
     render();
-    if (listIsOld()) loadDeals();
+    if (listIsOld()) loadDeals(); else if (stockIsDue()) loadStock();
+    // Esc works straight away (focus starts on the page underneath).
+    app.focus({ preventScroll: true });
   }
+  function stockIsDue() { return !!state.store && (!hasStock() || Date.now() - (state.stock.at || 0) > 6 * 3600e3); }
   // One rule everywhere: a list older than 10 minutes refreshes on open, on reconnect and on return.
   function listIsOld() { return !state.savedAt || Date.now() - state.savedAt > 10 * 60_000; }
-  window.addEventListener('online', () => { if (state.open && (state.error || listIsOld())) loadDeals(); });
+  window.addEventListener('online', () => {
+    if (!state.open) return;
+    if (state.error || listIsOld()) loadDeals(); else if (state.stockError || stockIsDue()) loadStock();
+  });
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && state.open && listIsOld()) loadDeals();
+    if (document.visibilityState !== 'visible' || !state.open) return;
+    if (listIsOld()) loadDeals(); else if (stockIsDue()) loadStock();
   });
 
   function closeApp() {
@@ -296,12 +309,17 @@ import {
 
     const banner = ref('banner');
     if (state.blocked && state.items.length) {
-      banner.innerHTML = `<div class="banner warn"><span><b>Quick check needed.</b> Vitamin Shoppe wants to confirm a person is browsing. Close this, complete any check on the page (or reload it), then reopen Deals · showing deals from ${relativeTime(state.savedAt)}.</span>
+      banner.innerHTML = `<div class="banner warn"><span><b>Quick check needed.</b> Vitamin Shoppe wants to confirm a person is browsing. Tap Reload page, complete any check, and Deals reopens. · Showing deals from ${relativeTime(state.savedAt)}.</span>
         <button class="text-btn" data-act="reload-page">Reload page</button></div>`;
     } else if (state.error && state.items.length) {
       banner.innerHTML = `<div class="banner warn"><span><b>Couldn't refresh.</b> ${esc(state.error.replace(/\.$/, ''))} · showing deals from ${relativeTime(state.savedAt)}.</span><button class="text-btn" data-act="refresh">Retry</button></div>`;
-    } else if (state.stockError) {
-      banner.innerHTML = `<div class="banner bad"><span>${esc(state.stockError)}</span><button class="text-btn" data-act="retry-stock">Retry</button></div>`;
+    } else if (state.partialNote) {
+      banner.innerHTML = `<div class="banner warn"><span>${esc(state.partialNote)}</span><button class="text-btn" data-act="refresh">Retry</button></div>`;
+    } else if (state.stockError && !(state.mode === 'pickup' && !hasStock())) {
+      banner.innerHTML = `<div class="banner bad"><span>${esc(state.stockError)}</span><button class="text-btn" data-act="${state.stockBlocked ? 'reload-page' : 'retry-stock'}">${state.stockBlocked ? 'Reload page' : 'Retry'}</button></div>`;
+    } else if (hasStock() && !state.stockLoading && Date.now() - (state.stock.at || 0) > 6 * 3600e3) {
+      // 7. shelf stock's age said once, not on every card
+      banner.innerHTML = `<div class="banner info"><span>Shelf stock at ${esc(state.store.name)} was checked ${relativeTime(state.stock.at)}.</span><button class="text-btn" data-act="retry-stock">Check now</button></div>`;
     } else banner.innerHTML = '';
 
     const list = ref('list'); const status = ref('status');
@@ -311,7 +329,7 @@ import {
       list.innerHTML = state.loading ? '<li class="skeleton"></li>'.repeat(4) : '';
       status.hidden = state.loading;
       status.innerHTML = state.loading ? '' : statusHtml(state.blocked ? '🛡️' : '⚠️',
-        state.blocked ? 'Quick check needed' : "Couldn't load deals", esc(state.error || "Vitamin Shoppe didn't send any deals."),
+        state.blocked ? 'Quick check needed' : "Couldn't load deals", state.blocked ? 'Vitamin Shoppe wants to confirm a person is browsing. Tap Reload page, complete any check, and Deals reopens.' : esc(state.error || "Vitamin Shoppe didn't send any deals."),
         [[state.blocked ? 'Reload page' : 'Try again', state.blocked ? 'reload-page' : 'refresh', true]]);
       return;
     }
@@ -327,9 +345,10 @@ import {
       return;
     }
     if (state.mode === 'pickup' && state.store && !hasStock() && !state.stockLoading) {
-      list.innerHTML = ''; status.hidden = false;
-      status.innerHTML = statusHtml('🏬', "Couldn't check shelves", `We couldn't get stock for ${esc(state.store.name)}.`,
-        [['Try again', state.blocked ? 'reload-page' : 'retry-stock', true], ['Show ship-to-home', 'ship']]);
+      list.innerHTML = ''; status.hidden = false; ref('summary').hidden = true;
+      status.innerHTML = statusHtml('🏬', state.stockBlocked ? 'Quick check needed' : "Couldn't check shelves",
+        esc(state.stockError || `We couldn't get stock for ${state.store.name}.`),
+        [[state.stockBlocked ? 'Reload page' : 'Try again', state.stockBlocked ? 'reload-page' : 'retry-stock', true], ['Show ship-to-home', 'ship']]);
       return;
     }
     if (!deals.length) { list.innerHTML = ''; status.hidden = false; status.innerHTML = noMatchesHtml(); return; }
@@ -367,7 +386,7 @@ import {
     if (state.store && state.stockLoading && d.qty == null) stock = 'Checking shelf…';
     else if (hasStock() && d.qty > 0) {
       stock = `${d.qty} on the shelf` + (d.pickup === false ? ' · walk-in only' : '') +
-        (Date.now() - (state.stock.at || 0) > 6 * 3600e3 ? ` (checked ${relativeTime(state.stock.at)})` : '');
+        '';
       dot = 'good';
     }
     else if (hasStock() && d.qty != null) stock = d.oos ? 'Not in store · sold out online' : 'Not in store · ships';
@@ -543,6 +562,10 @@ import {
   });
   root.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
+    const t = e.composedPath ? e.composedPath()[0] : e.target;
+    if (t && t.matches && t.matches('[data-ref="q"]') && t.value) {
+      t.value = ''; state.query = ''; render(); return;
+    }
     if (state.sheet) closeSheet(); else closeApp();
   });
   launcher.addEventListener('click', openApp);

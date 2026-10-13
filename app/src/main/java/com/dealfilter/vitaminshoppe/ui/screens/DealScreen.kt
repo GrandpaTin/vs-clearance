@@ -199,8 +199,9 @@ fun DealScreenContent(state: DealUiState, viewModel: DealActions, modifier: Modi
         scope.launch { snackbar.showSnackbar(text) }
     }
 
-    // Pull-to-refresh <-> view model loading state.
-    if (pullState.isRefreshing) {
+    // Pull-to-refresh <-> view model loading state. The indicator is also shown for automatic
+    // refreshes; only a pull while idle is the user asking (which resets retries and cool-downs).
+    if (pullState.isRefreshing && current.status == LoadStatus.IDLE) {
         LaunchedEffect(Unit) {
             viewModel.refresh()
             // If a refresh was already finishing, status may never flip; don't spin forever.
@@ -250,12 +251,12 @@ fun DealScreenContent(state: DealUiState, viewModel: DealActions, modifier: Modi
                         IconButton(onClick = viewModel::openWebShare) {
                             Icon(
                                 when {
-                                    state.webShare.status == WebShareState.Status.ERROR -> Icons.Default.CloudOff
+                                    state.webShare.needsAttention -> Icons.Default.CloudOff
                                     state.webShare.enabled && state.webShare.isConfigured -> Icons.Default.CloudDone
                                     else -> Icons.Default.CloudUpload
                                 },
                                 contentDescription = when {
-                                    state.webShare.status == WebShareState.Status.ERROR -> "Share to web: needs attention"
+                                    state.webShare.needsAttention -> "Share to web: needs attention"
                                     state.webShare.enabled && state.webShare.isConfigured -> "Share to web (on)"
                                     else -> "Share to web"
                                 },
@@ -619,7 +620,30 @@ private fun Banners(state: DealUiState, viewModel: DealActions, now: Long) {
     Column {
         val release = state.update.available
         val downloading = state.update.progress
-        if (release != null && downloading != null && !state.update.isDialogOpen) {
+        val refresh = refreshNotice(state, now)
+        val stockShown = state.stockError != null && !(state.mode == FulfillmentMode.PICKUP && state.visibleDeals.isEmpty())
+        val updateWaits = refresh != null || stockShown
+        if (release != null && downloading == null && !state.update.isDialogOpen && state.update.error != null && !updateWaits) {
+            Banner(
+                icon = Icons.Default.SystemUpdate,
+                text = "Update ${release.versionName} didn't download",
+                detail = state.update.error,
+                container = badges.amberContainer,
+                content = badges.onAmberContainer,
+                action = "Show",
+                onAction = viewModel::openUpdate
+            )
+        } else if (release != null && state.update.readyToInstall && downloading == null && !state.update.isDialogOpen && !updateWaits) {
+            Banner(
+                icon = Icons.Default.SystemUpdate,
+                text = "Update ${release.versionName} downloaded",
+                detail = "Ready to install — your filters and saved deals stay as they are",
+                container = badges.skyBlueContainer,
+                content = badges.onSkyBlueContainer,
+                action = "Install",
+                onAction = viewModel::openUpdate
+            )
+        } else if (release != null && downloading != null && !state.update.isDialogOpen) {
             Banner(
                 icon = Icons.Default.SystemUpdate,
                 text = "Downloading update ${release.versionName}",
@@ -629,7 +653,7 @@ private fun Banners(state: DealUiState, viewModel: DealActions, now: Long) {
                 action = "Show",
                 onAction = viewModel::openUpdate
             )
-        } else if (release != null && state.update.showBanner) {
+        } else if (release != null && state.update.showBanner && !updateWaits) {
             Banner(
                 icon = Icons.Default.SystemUpdate,
                 text = "Update available: ${release.versionName}",
@@ -640,7 +664,7 @@ private fun Banners(state: DealUiState, viewModel: DealActions, now: Long) {
                 onAction = viewModel::openUpdate
             )
         }
-        refreshNotice(state, now)?.let { notice ->
+        refresh?.let { notice ->
             Banner(
                 icon = when (notice.kind) {
                     RefreshNotice.Kind.OFFLINE -> Icons.Default.CloudOff

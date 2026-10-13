@@ -198,6 +198,8 @@ main { max-width: 900px; margin: 0 auto; padding: 0 0 16px; }
 .status .badge { width: 88px; height: 88px; border-radius: 50%; display: grid; place-items: center; background: var(--sky-bg); color: var(--sky-fg); font-size: 40px; }
 .status h2 { margin: 8px 0 0; font-size: 1.15rem; text-wrap: balance; }
 .status p { margin: 0; color: var(--muted); max-width: 460px; }
+.status a { color: var(--sky-fg); font-weight: 700; }
+@media (prefers-color-scheme: light) { .status a { color: var(--navy); } }
 .status .actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 8px; }
 .primary-btn {
   background: var(--navy); color: #fff; border: 0; border-radius: 999px; min-height: 44px; padding: 0 20px; font-weight: 700;

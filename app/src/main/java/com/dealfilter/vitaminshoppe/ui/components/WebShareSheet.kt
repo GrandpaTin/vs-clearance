@@ -59,8 +59,9 @@ fun shareStatusText(share: WebShareState, now: Long): String = when (share.statu
     WebShareState.Status.ERROR -> share.lastError ?: "Couldn't sync."
     WebShareState.Status.LIVE -> {
         val at = share.lastPublishedAt ?: now
-        if (share.isGitHub && now - at < 2 * 60_000L) "Live on the site in about a minute"
+        val live = if (share.isGitHub && share.lastNote == null && now - at < 2 * 60_000L) "Live on the site in about a minute"
         else "Live on the site · synced ${ago(at, now)}"
+        if (share.lastNote != null) "$live — ${share.lastNote}" else live
     }
     WebShareState.Status.READY -> "Ready — tap Publish now."
 }
@@ -83,7 +84,8 @@ fun WebShareSheet(
     var showServer by rememberSaveable { mutableStateOf(share.serverUrl.isNotBlank() && !share.hasGitHub) }
     val dirty = WebPublisher.normalizeUrl(repo) != share.gitHubRepo || repoToken.trim() != share.gitHubToken ||
         WebPublisher.normalizeUrl(server) != share.serverUrl || serverToken.trim() != share.serverToken
-    val canPublish = (repo.isNotBlank() && repoToken.isNotBlank()) || (server.isNotBlank() && serverToken.isNotBlank())
+    val repoInvalid = repo.isNotBlank() && WebPublisher.gitHubRepo(repo) == null
+    val canPublish = (repo.isNotBlank() && !repoInvalid && repoToken.isNotBlank()) || (server.isNotBlank() && serverToken.isNotBlank())
     val now = System.currentTimeMillis()
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
@@ -122,6 +124,8 @@ fun WebShareSheet(
                 onValueChange = { repo = it },
                 label = { Text("GitHub repo") },
                 placeholder = { Text("github.com/you/vs-clearance") },
+                isError = repoInvalid,
+                supportingText = if (repoInvalid) ({ Text("Use the form github.com/owner/repo") }) else null,
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
                 modifier = Modifier.fillMaxWidth()
@@ -164,7 +168,7 @@ fun WebShareSheet(
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
                 OutlinedButton(
                     onClick = { onSave(repo, repoToken, server, serverToken, share.enabled || !share.isConfigured) },
-                    enabled = dirty,
+                    enabled = dirty && !repoInvalid,
                     modifier = Modifier.weight(1f).heightIn(min = 48.dp)
                 ) { Text("Save") }
                 Button(

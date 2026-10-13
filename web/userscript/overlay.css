@@ -53,6 +53,7 @@ h1 { font-size: 1.35rem; margin: 0; }
 .banner span { flex: 1; }
 .banner.warn { background: var(--amber-bg); color: var(--amber-fg); }
 .banner.bad { background: var(--red-bg); color: var(--red-fg); }
+.banner.info { background: var(--sky-bg); color: var(--sky-fg); }
 .text-btn { background: none; border: 0; font-weight: 700; padding: 10px 12px; min-height: 44px; border-radius: 8px; }
 
 .controls { padding: 12px 12px 4px; }
@@ -148,3 +149,4 @@ pre { white-space: pre-wrap; background: var(--surface-2); border-radius: 12px; 
 
 .foot-note { text-align: center; color: var(--muted); font-size: .8rem; padding: 4px 16px 24px; }
 .link-btn { background: none; border: 0; color: inherit; text-decoration: underline; font: inherit; padding: 8px 4px; min-height: 40px; cursor: pointer; }
+.app:focus { outline: none; }

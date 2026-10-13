@@ -3,6 +3,9 @@ import {
   facts, applyFilters, categoryCounts, inCategory, changes, prune, aiPrompt, storeAddress, relativeTime
 } from './core.js';
 
+// First thing once the app's code has loaded: boot-check.js only steps in when this never happens.
+document.documentElement.dataset.booted = '1';
+
 const $ = (id) => document.getElementById(id);
 // Desktop browsers expose navigator.share too, but there the expected action is a copy.
 const nativeShare = !!navigator.share && /iphone|ipad|ipod|android/i.test(navigator.userAgent);
@@ -56,7 +59,7 @@ async function load({ manual = false } = {}) {
     if (!res.ok) throw new Error('HTTP ' + res.status);
     // The service worker answers with its saved copy when the network is down.
     const fromCache = res.headers.get('X-From-Cache') === '1';
-    if (fromCache && state.snapshot) { state.error = 'offline'; changed = false; if (manual) toast('You’re offline'); return; }
+    if (fromCache && state.snapshot) { state.error = 'offline'; changed = false; if (manual) toast(before === 'offline' ? 'Still offline' : 'You’re offline'); return; }
     if (!fromCache) state.etag = res.headers.get('ETag');
     const snap = await res.json();
     acceptSnapshot(snap);
@@ -612,3 +615,6 @@ if ('serviceWorker' in navigator) {
 
 render();
 load();
+setTimeout(() => {
+  if (state.loading && !state.snapshot) $('subtitle').textContent = 'Still loading — slow connection…';
+}, 10000);

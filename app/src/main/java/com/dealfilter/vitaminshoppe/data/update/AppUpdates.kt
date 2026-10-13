@@ -119,7 +119,12 @@ open class AppUpdater(
         }
     }
 
-    fun openDialog() = _state.update { it.copy(isDialogOpen = true, error = null) }
+    /** Keeps any error: a download that failed while the dialog was hidden still says why. */
+    fun openDialog() = _state.update { it.copy(isDialogOpen = true) }
+
+    /** Set by the screen: Android won't open the installer for an app that isn't in view. */
+    @Volatile var inForeground: Boolean = true
+    private var installWhenSeen = false
 
     /** "Later": hide this version's banner until a newer one or a manual check. */
     fun dismiss() {
@@ -170,6 +175,12 @@ open class AppUpdater(
             _state.update { it.copy(needsInstallPermission = true) }
             return
         }
+        if (!inForeground) {
+            // Finished downloading in the background: open the installer when the app is next seen.
+            installWhenSeen = true
+            return
+        }
+        installWhenSeen = false
         val uri = FileProvider.getUriForFile(context, context.packageName + ".updates", apkFile)
         val intent = Intent(Intent.ACTION_VIEW)
             .setDataAndType(uri, "application/vnd.android.package-archive")
@@ -190,7 +201,7 @@ open class AppUpdater(
     /** Back from Settings: carry on if the permission was granted. */
     fun onReturnedToApp() {
         val s = _state.value
-        if (s.needsInstallPermission && s.readyToInstall && canInstall()) install()
+        if ((s.needsInstallPermission || installWhenSeen) && s.readyToInstall && canInstall()) install()
     }
 
     fun closeDialog() = _state.update { it.copy(isDialogOpen = false) }

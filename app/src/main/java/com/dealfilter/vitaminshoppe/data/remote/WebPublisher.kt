@@ -38,6 +38,8 @@ data class WebShareState(
     val pending: Boolean = false,
     /** Why it's waiting, e.g. "Will sync when dn.example.ts.net is reachable". */
     val pendingReason: String? = null,
+    /** Published, but something needs a look (e.g. GitHub refused it and the own server took it). */
+    val lastNote: String? = null,
     val isPublishing: Boolean = false
 ) {
     enum class Status { NOT_SET_UP, OFF, SYNCING, WAITING, ERROR, LIVE, READY }
@@ -54,6 +56,9 @@ data class WebShareState(
         get() = WebPublisher.gitHubRepo(gitHubRepo)?.takeIf { hasGitHub || !hasServer }
             ?.let { (owner, repo) -> "https://${owner.lowercase()}.github.io/$repo/" }
             ?: serverUrl
+
+    /** Worth a look from the toolbar: failing, or working only through the fallback. */
+    val needsAttention: Boolean get() = status == Status.ERROR || (enabled && lastNote != null)
 
     val status: Status
         get() = when {
@@ -110,7 +115,9 @@ class WebPublisher(
         serverToken = prefs.getString(K_SRV_TOKEN, "") ?: "",
         lastPublishedAt = prefs.getLong(K_LAST, 0L).takeIf { it > 0 },
         lastError = prefs.getString(K_ERROR, null),
-        pending = prefs.getBoolean(K_PENDING, false)
+        pending = prefs.getBoolean(K_PENDING, false),
+        pendingReason = prefs.getString(K_PENDING_REASON, null),
+        lastNote = prefs.getString(K_NOTE, null)
     )
 
     /** Versions before 3.1 kept one target under "url"/"token"; sort it into the right slot. */
@@ -145,7 +152,7 @@ class WebPublisher(
         _state.update { it.copy(enabled = enabled, lastError = null) }
     }
 
-    private class Outcome(val error: String?, val retryLater: Boolean = false)
+    private class Outcome(val error: String?, val retryLater: Boolean = false, val note: String? = null)
 
     /** Returns null on success, or a user-facing reason (an unreachable target is marked pending). */
     suspend fun publish(
@@ -161,13 +168,18 @@ class WebPublisher(
         val outcome = withContext(Dispatchers.IO) {
             val repo = gitHubRepo(s.gitHubRepo)
             if (s.hasGitHub && repo != null) {
-                try {
-                    Outcome(publishToGitHub(repo, s.gitHubToken, buildPayload(items, savedAt, store, stockStoreId, stock, System.currentTimeMillis())))
+                val viaGitHub = try {
+                    publishToGitHub(repo, s.gitHubToken, buildPayload(items, savedAt, store, stockStoreId, stock, System.currentTimeMillis()))
                 } catch (e: IOException) {
                     Outcome("Will sync when online", retryLater = true)
                 } catch (e: Exception) {
                     Outcome("GitHub sent an unexpected reply. Try again in a minute.")
                 }
+                // GitHub didn't take it but the owner's own server is set up: use that rather than nothing.
+                if (viaGitHub.error != null && s.hasServer) {
+                    val viaServer = publishToServer(s, buildPayload(items, savedAt, store, stockStoreId, stock))
+                    if (viaServer.error == null) Outcome(null, note = "GitHub: ${viaGitHub.error.trimEnd('.')}. Published to your server instead.") else viaGitHub
+                } else viaGitHub
             } else {
                 publishToServer(s, buildPayload(items, savedAt, store, stockStoreId, stock))
             }
@@ -176,6 +188,8 @@ class WebPublisher(
         val ok = outcome.error == null
         prefs.edit().putBoolean(K_PENDING, outcome.retryLater)
             .putString(K_ERROR, if (outcome.retryLater) null else outcome.error)
+            .putString(K_NOTE, outcome.note)
+            .putString(K_PENDING_REASON, if (outcome.retryLater) outcome.error else null)
             .apply { if (ok) putLong(K_LAST, now) }.apply()
         _state.update {
             it.copy(
@@ -183,6 +197,7 @@ class WebPublisher(
                 pending = outcome.retryLater,
                 pendingReason = if (outcome.retryLater) outcome.error else null,
                 lastError = if (outcome.retryLater) null else outcome.error,
+                lastNote = outcome.note,
                 lastPublishedAt = if (ok) now else it.lastPublishedAt
             )
         }
@@ -224,7 +239,7 @@ class WebPublisher(
      * Replaces the repo's `deals` branch with one commit holding snapshot.json; the Pages workflow
      * redeploys on that push. A single force-updated commit keeps the repo from growing with every refresh.
      */
-    private fun publishToGitHub(repo: Pair<String, String>, token: String, payload: String): String? {
+    private fun publishToGitHub(repo: Pair<String, String>, token: String, payload: String): Outcome {
         val (owner, name) = repo
         val git = "https://api.github.com/repos/$owner/$name/git"
         val who = JSONObject().put("name", "VS Clearance").put("email", "vs-clearance@users.noreply.github.com")
@@ -232,21 +247,22 @@ class WebPublisher(
             JSONObject().put("path", "snapshot.json").put("mode", "100644").put("type", "blob").put("content", payload)
         ))
         val (treeCode, treeBody) = gitHub("POST", "$git/trees", token, tree)
-        if (treeCode !in 200..299) return gitHubError(treeCode, owner, name)
+        if (treeCode !in 200..299) return Outcome(gitHubError(treeCode, owner, name))
         val commit = JSONObject().put("message", "Deals update").put("tree", treeBody!!.getString("sha"))
             .put("parents", JSONArray()).put("author", who).put("committer", who)
         val (commitCode, commitBody) = gitHub("POST", "$git/commits", token, commit)
-        if (commitCode !in 200..299) return gitHubError(commitCode, owner, name)
+        if (commitCode !in 200..299) return Outcome(gitHubError(commitCode, owner, name))
         val sha = commitBody!!.getString("sha")
         val (refCode, _) = gitHub("PATCH", "$git/refs/heads/deals", token, JSONObject().put("sha", sha).put("force", true))
         if (refCode !in 200..299) {
             // First publish: the branch doesn't exist yet.
             val (newCode, _) = gitHub("POST", "$git/refs", token, JSONObject().put("ref", "refs/heads/deals").put("sha", sha))
-            if (newCode !in 200..299) return gitHubError(newCode, owner, name)
+            if (newCode !in 200..299) return Outcome(gitHubError(newCode, owner, name))
         }
         // Rebuild the site from main (a push to `deals` alone runs no workflow).
         val (kick, _) = gitHub("POST", "https://api.github.com/repos/$owner/$name/dispatches", token, JSONObject().put("event_type", "deals"))
-        return if (kick in 200..299) null else "Saved to GitHub, but the site didn't start updating (${kick}). It will on the next sync."
+        // The list is saved; only the rebuild didn't start. The next sync starts it, so this is "waiting", not an error.
+        return if (kick in 200..299) Outcome(null) else Outcome("Saved; the site will rebuild on the next sync", retryLater = true)
     }
 
     private fun gitHubError(code: Int, owner: String, name: String): String = when (code) {
@@ -303,6 +319,8 @@ class WebPublisher(
         private const val K_LAST = "last"
         private const val K_PENDING = "pending"
         private const val K_ERROR = "error"
+        private const val K_PENDING_REASON = "pending_reason"
+        private const val K_NOTE = "note"
 
         /** Same field names as the app's cache file, which the web app reads directly. */
         fun buildPayload(
