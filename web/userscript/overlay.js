@@ -292,6 +292,18 @@ import {
     if (document.visibilityState !== 'visible' || !state.open) return;
     if (listIsOld()) loadDeals(); else if (stockIsDue()) loadStock();
   });
+  // Left open on screen (no tab switch to trigger the above): keep "Updated …" honest and refresh
+  // on the same rule. Errors wait for Retry / reconnect so a failing site isn't hammered.
+  setInterval(() => {
+    if (!state.open || document.visibilityState !== 'visible' || state.loading || state.stockLoading) return;
+    if (!state.error && !state.blocked && listIsOld()) loadDeals();
+    else if (!state.stockError && stockIsDue()) loadStock();
+    else if (state.savedAt) {
+      // Only the time-based text: rebuilding the list would knock keyboard focus and scroll about.
+      const n = changeIds().size;
+      ref('subtitle').textContent = `Updated ${relativeTime(state.savedAt)}` + (n ? ` · ${n} new or cheaper` : '');
+    }
+  }, 60_000);
 
   function closeApp() {
     state.open = false; app.hidden = true; launcher.hidden = !get('launcher', true);
@@ -316,9 +328,9 @@ import {
 
   function renderFootNote() {
     const hidden = !get('launcher', true);
-    ref('footNote').innerHTML = `VS Clearance ${esc(__VSX_VERSION__)} · <a class="link-btn" href="${esc(__VSX_HOME__)}vs-clearance.user.js" target="_blank" rel="noopener">Update VS Clearance</a> · ` +
+    ref('footNote').innerHTML = `<span class="fn">VS Clearance ${esc(__VSX_VERSION__)}</span><span class="fn"><a class="link-btn" href="${esc(__VSX_HOME__)}vs-clearance.user.js" target="_blank" rel="noopener">Update VS Clearance</a></span><span class="fn">` +
       (hidden ? '<button class="link-btn" data-act="show-launcher">Show the 🏷️ Deals button</button>'
-        : '<button class="link-btn" data-act="hide-launcher">Hide the 🏷️ Deals button</button>');
+        : '<button class="link-btn" data-act="hide-launcher">Hide the 🏷️ Deals button</button>') + '</span>';
   }
 
   const savedPhrase = () => {
@@ -337,7 +349,7 @@ import {
 
     const banner = ref('banner');
     if (state.blocked && state.items.length) {
-      banner.innerHTML = `<div class="banner warn"><span><b>Quick check needed.</b> Vitamin Shoppe wants to confirm a person is browsing. Tap Reload page, complete any check, and Deals reopens. · ${savedPhrase().replace(/^s/, 'S')}.</span>
+      banner.innerHTML = `<div class="banner warn"><span><b>Quick check needed</b> to refresh · ${savedPhrase()}. Reload, complete Vitamin Shoppe's check, and Deals reopens.</span>
         <button class="text-btn" data-act="reload-page">Reload page</button></div>`;
     } else if (state.error && state.items.length) {
       banner.innerHTML = `<div class="banner warn"><span><b>Couldn't refresh.</b> ${esc(state.error.replace(/\.$/, ''))} · ${savedPhrase()}.</span>` +
@@ -347,8 +359,10 @@ import {
       banner.innerHTML = `<div class="banner warn"><span>${esc(state.partialNote)}</span><button class="text-btn" data-act="refresh">Retry</button></div>`;
     } else if (state.stockError && state.mode === 'ship') {
       banner.innerHTML = `<div class="banner info"><span>Shelf stock at ${esc(state.store?.name || 'your store')} ${state.stockBlocked ? 'needs a quick check' : "couldn't be checked"}.</span><button class="text-btn" data-act="${state.stockBlocked ? 'reload-page' : 'retry-stock'}">${state.stockBlocked ? 'Reload page' : 'Retry'}</button></div>`;
-    } else if (state.stockError && !(state.mode === 'pickup' && !hasStock())) {
-      banner.innerHTML = `<div class="banner bad"><span>${esc(state.stockError)}</span><button class="text-btn" data-act="${state.stockBlocked ? 'reload-page' : 'retry-stock'}">${state.stockBlocked ? 'Reload page' : 'Retry'}</button></div>`;
+    } else if (state.stockError && !(state.mode === 'pickup' && (!hasStock() || !visible().length))) {
+      // (In pickup with nothing to show, the full-page panel below says it instead.)
+      const age = hasStock() ? ` · showing stock checked ${relativeTime(state.stock.at)}` : '';
+      banner.innerHTML = `<div class="banner bad"><span>${esc(state.stockError.replace(/\.$/, ''))}${age}.</span><button class="text-btn" data-act="${state.stockBlocked ? 'reload-page' : 'retry-stock'}">${state.stockBlocked ? 'Reload page' : 'Retry'}</button></div>`;
     } else if (hasStock() && !state.stockLoading && Date.now() - (state.stock.at || 0) > 6 * 3600e3) {
       // 7. shelf stock's age said once, not on every card
       banner.innerHTML = `<div class="banner info"><span>Shelf stock at ${esc(state.store.name)} was checked ${relativeTime(state.stock.at)}.</span><button class="text-btn" data-act="retry-stock">Check now</button></div>`;
@@ -465,7 +479,7 @@ import {
     if (state.onlyChanges) fixes.push(['Show everything', 'clear']);
     if (state.mode === 'pickup') fixes.push(['Show ship-to-home', 'ship']);
     if (!fixes.length && state.mode === 'ship' && state.inStockOnly) fixes.push(['Include out of stock', 'instock']);
-    return statusHtml('🔍', 'No matching deals', reasons.length ? `Nothing on clearance${at} ${reasons.join(', ')}.` : `Nothing on clearance${at} right now.`,
+    return statusHtml('🔍', 'No matching deals', reasons.length ? `Nothing on clearance${at} ${reasons.join(', ')}.` : `Nothing on clearance${at}.`,
       fixes.map((f, i) => [f[0], f[1], i === 0]));
   }
 
@@ -527,7 +541,17 @@ import {
 
   // ------------------------------------------------------------------- events
 
-  function update(fn) { fn(); prefs(); render(); }
+  function update(fn) {
+    const a = root.activeElement;
+    const act = a && a.dataset ? a.dataset.act : null, v = a && a.dataset ? a.dataset.v : undefined;
+    fn(); prefs(); render();
+    // render() replaces the buttons; put focus back on the same one so Tab doesn't start over.
+    if (act && !(root.activeElement && root.activeElement.isConnected)) {
+      const same = v == null ? null : [...root.querySelectorAll(`[data-act="${act}"]`)].find((el) => el.dataset.v === v);
+      const t = same || root.querySelector(`[data-act="${act}"]`);
+      if (t && t.offsetParent) t.focus({ preventScroll: true });
+    }
+  }
 
   root.addEventListener('click', async (e) => {
     const el = e.target.closest('[data-act]');
@@ -571,8 +595,14 @@ import {
         if (s.closed || !s.pickup) return toast(s.closed ? `${s.name} is temporarily closed.` : `${s.name} doesn't offer pickup.`);
         closeSheet();
         update(() => { state.store = s; state.mode = 'pickup'; state.stock = null; rebuild(); });
+        const row = root.querySelector('.store-row');
+        if (row) row.focus({ preventScroll: true });
         await loadStock();
-        if (hasStock()) toast(`${state.items.filter((d) => d.qty > 0).length} clearance items on the shelf at ${s.name}`);
+        // 5. say "none" plainly rather than "0 items"
+        if (hasStock()) {
+          const onShelf = state.items.filter((d) => d.qty > 0).length;
+          toast(onShelf ? `${onShelf} clearance item${onShelf === 1 ? '' : 's'} on the shelf at ${s.name}` : `None of the clearance items are on the shelf at ${s.name}`);
+        }
         return;
       }
       case 'clear-store':
@@ -674,17 +704,23 @@ import {
     // Leave the check alone (and keep #vsdeals, so Deals opens when the page reloads after it).
     if (onCheckPage()) return;
     document.body.appendChild(host);
-    // The automatic check can add its frame a little after load (later on a slow phone): watch for
-    // ten seconds and step aside if it appears.
-    const watchUntil = Date.now() + 10_000;
-    const watch = setInterval(() => {
-      if (Date.now() > watchUntil) return clearInterval(watch);
-      if (!onCheckPage()) return;
-      clearInterval(watch);
-      state.open = false; // stops the reconnect / tab-return refreshes too
-      host.remove();
-      document.documentElement.style.overflow = '';
-    }, 500);
+    // The automatic check can add its frame after load, however slow the phone: watch the page for
+    // it and step aside when it appears. (Our own nodes live in a shadow root, so they don't trigger this.)
+    // Checked at most every 300 ms: the store's own page mutates constantly.
+    let queued = false;
+    const watch = new MutationObserver(() => {
+      if (queued) return;
+      queued = true;
+      setTimeout(() => {
+        queued = false;
+        if (!onCheckPage()) return;
+        watch.disconnect();
+        state.open = false; // stops the reconnect / tab-return refreshes too
+        host.remove();
+        document.documentElement.style.overflow = '';
+      }, 300);
+    });
+    watch.observe(document.documentElement, { childList: true, subtree: true });
     const paired = takePairing();
     // Coming in through #vsdeals brings a hidden Deals button back.
     if (location.hash === '#vsdeals') put('launcher', true);

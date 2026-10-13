@@ -149,5 +149,7 @@ pre { white-space: pre-wrap; background: var(--surface-2); border-radius: 12px; 
 .share-line a { color: var(--link); text-decoration: none; }
 
 .foot-note { text-align: center; color: var(--muted); font-size: .8rem; padding: 4px 16px 24px; }
+.foot-note .fn { display: inline-block; }
+.foot-note .fn + .fn::before { content: "·"; padding: 0 .4em; }
 .link-btn { background: none; border: 0; color: inherit; text-decoration: underline; font: inherit; padding: 8px 4px; min-height: 40px; cursor: pointer; }
 .app:focus { outline: none; }

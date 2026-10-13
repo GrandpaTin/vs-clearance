@@ -156,7 +156,8 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
             while (true) {
                 delay(5 * 60_000L)
                 val s = _uiState.value
-                if (inForeground && s.loadError == null && isRefreshDue(System.currentTimeMillis())) refreshInternal(auto = true)
+                // After a failure isRefreshDue waits out lastFailureAt, so this is at most one try per 5 minutes.
+                if (inForeground && isRefreshDue(System.currentTimeMillis())) refreshInternal(auto = true)
             }
         }
     }
@@ -247,6 +248,7 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
     /** The user asked: start over on retries and forget an earlier "not now" on the site's check. */
     override fun refresh() {
         autoFailures = 0
+        stockFailures = 0
         autoRetryJob?.cancel()
         verificationDeclinedAt = 0L
         refreshInternal(auto = false)
@@ -364,6 +366,8 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
     }
 
     override fun retryStock() {
+        stockFailures = 0
+        stockRetryJob?.cancel()
         _uiState.value.selectedStore?.let { startStockLoad(it) }
     }
 
@@ -587,6 +591,8 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
             return
         }
         storeSearchJob?.cancel()
+        stockFailures = 0
+        stockRetryJob?.cancel()
         _uiState.update {
             it.copy(
                 selectedStore = store,
@@ -603,6 +609,8 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
 
     override fun clearStore() {
         stockJob?.cancel()
+        stockRetryJob?.cancel()
+        stockFailures = 0
         afterVerification.remove("stock")
         _uiState.update {
             it.copy(

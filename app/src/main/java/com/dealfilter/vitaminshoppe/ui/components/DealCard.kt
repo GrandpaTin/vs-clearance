@@ -285,7 +285,7 @@ private fun AvailabilityLine(deal: DealItem, store: StoreLocation?, isStockLoadi
         store != null && deal.storeQuantity == null && deal.jdaSkuId != null ->
             "Shelf stock unknown" to MaterialTheme.colorScheme.outline
         store != null && deal.storeQuantity != null && deal.storeQuantity > 0 ->
-            "${deal.storeQuantity} on the shelf" + (if (deal.isPickupEligible) "" else " · walk‑in only") to badges.onEmeraldContainer
+            (if (deal.isPickupEligible) "${deal.storeQuantity} on the shelf" else "${deal.storeQuantity} on shelf · walk‑in only") to badges.onEmeraldContainer
         store != null && deal.storeQuantity != null ->
             (if (deal.isOutOfStockOnline) "Not in store · sold out online" else "Not in store · ships") to MaterialTheme.colorScheme.outline
         deal.isOutOfStockOnline -> "Out of stock online" to badges.onRedContainer

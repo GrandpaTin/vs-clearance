@@ -53,9 +53,16 @@ async function load({ manual = false } = {}) {
   const previousPublished = state.snapshot?.publishedAt;
   let changed = true;
   try {
-    // Never wait forever on a stalled connection: give up after 15 s and say so.
+    // Never leave a stalled connection unexplained: after 15 s say so. With a list on screen, give
+    // up on the check; on a first visit keep the (large) download going and take it if it lands.
     const abort = new AbortController();
-    const timer = setTimeout(() => abort.abort(), 15000);
+    let timer = setTimeout(function stalled() {
+      if (hadList || state.snapshot) return abort.abort();
+      state.loading = false;
+      state.error = navigator.onLine === false ? 'offline' : 'failed';
+      render();
+      timer = setTimeout(() => abort.abort(), 45000);
+    }, 15000);
     let res;
     try {
       res = await fetch('api/snapshot', { headers: state.etag ? { 'If-None-Match': state.etag } : {}, cache: 'no-cache', signal: abort.signal });
@@ -76,14 +83,20 @@ async function load({ manual = false } = {}) {
     if (!res.ok) throw new Error('HTTP ' + res.status);
     // The service worker answers with its saved copy when the network is down.
     const fromCache = res.headers.get('X-From-Cache') === '1';
-    if (fromCache && state.snapshot) { state.error = 'offline'; changed = false; if (manual) toast(before === 'offline' ? 'Still offline' : 'You’re offline'); return; }
+    // The phone may still have bars (a weak in-store signal): only say "offline" when it really is.
+    const cached = navigator.onLine === false ? 'offline' : 'slow';
+    if (fromCache && state.snapshot) {
+      state.error = cached; changed = false;
+      if (manual) toast(before === cached ? (cached === 'offline' ? 'Still offline' : 'Connection is still slow') : (cached === 'offline' ? 'You’re offline' : 'Connection is slow'));
+      return;
+    }
     if (!fromCache) state.etag = res.headers.get('ETag');
     const snap = await res.json();
     acceptSnapshot(snap);
     quietFailures = 0;
-    state.error = fromCache ? 'offline' : null;
+    state.error = fromCache ? cached : null;
     const sameList = hadList && previousPublished === snap.publishedAt;
-    if (manual) toast(fromCache ? 'You’re offline · showing the last deals loaded'
+    if (manual) toast(fromCache ? `${cached === 'offline' ? 'You’re offline' : 'Connection is slow'} · showing the last deals loaded`
       : sameList ? (oldList() ? `No newer list yet — this one is from ${relativeTime(snap.savedAt || snap.publishedAt)}` : 'You’re up to date')
       : oldList() ? `Loaded · this list is from ${relativeTime(snap.savedAt || snap.publishedAt)}`
       : hadList ? 'Updated' : 'Deals loaded');
@@ -95,7 +108,7 @@ async function load({ manual = false } = {}) {
     }
     state.error = failure;
     // The banner says it; a toast is only needed when the banner was already up (nothing visibly changes).
-    if (manual && state.snapshot && before === state.error) toast(state.error === 'offline' ? 'Still offline' : 'Still couldn’t check for updates');
+    if (manual && state.snapshot && before === state.error) toast(state.error === 'offline' ? 'Still offline' : state.error === 'slow' ? 'Connection is still slow' : 'Still couldn’t check for updates');
     changed = !state.snapshot;
   } finally {
     state.loading = false;
@@ -181,7 +194,7 @@ function render() {
 
 function renderHeader() {
   const snap = state.snapshot;
-  if (state.loading) $('subtitle').textContent = 'Loading…';
+  if (state.loading) $('subtitle').textContent = snap ? 'Checking for newer deals…' : 'Loading…';
   else if (snap) {
     const n = changeIds().size;
     $('subtitle').textContent = `Updated ${relativeTime(snap.savedAt || snap.publishedAt)}` + (n ? ` · ${n} new or cheaper` : '');
@@ -204,7 +217,8 @@ function renderHeader() {
   if (snap && state.error) {
     banner.hidden = false;
     const shown = oldList() ? `showing the list from ${relativeTime(snap.savedAt || snap.publishedAt)} — prices may have changed` : 'showing the last deals loaded';
-    banner.innerHTML = `<span>${state.error === 'offline' ? 'You’re offline' : 'Couldn’t check for updates'} · ${shown}.</span>` +
+    const why = state.error === 'offline' ? 'You’re offline' : state.error === 'slow' ? 'Connection is slow' : 'Couldn’t check for updates';
+    banner.innerHTML = `<span>${why} · ${shown}.</span>` +
       '<button class="text-btn" type="button" data-act="refresh">Try again</button>';
     if (hadFocus) banner.querySelector('button').focus();
   }
@@ -672,6 +686,17 @@ function showUpdate() {
 
 render();
 load();
+// Show the list saved on this device straight away (weak in-store signal); load() replaces it.
+(async () => {
+  try {
+    const r = window.caches && await caches.match('api/snapshot');
+    if (!r || state.snapshot) return;
+    const snap = await r.json();
+    if (state.snapshot || !Array.isArray(snap?.items)) return;
+    acceptSnapshot(snap);
+    render();
+  } catch { /* no saved copy: the network load shows its own states */ }
+})();
 setTimeout(() => {
   if (state.loading && !state.snapshot) $('subtitle').textContent = 'Still loading — slow connection…';
 }, 10000);

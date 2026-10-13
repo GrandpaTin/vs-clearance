@@ -399,8 +399,9 @@ fun DealScreenContent(state: DealUiState, viewModel: DealActions, modifier: Modi
                             icon = Icons.Default.ErrorOutline,
                             warning = true,
                             title = "Couldn't check shelves at ${state.selectedStore?.name ?: "your store"}",
-                            body = "Shelf stock didn't load. You can try again, or browse ship-to-home deals meanwhile.",
-                            primary = "Try again" to viewModel::retryStock,
+                            body = (if (state.stockError.startsWith("Complete")) state.stockError else state.stockError.substringAfter(". ", "").ifBlank { "Shelf stock didn't load." }) +
+                                " You can try again, or browse ship-to-home deals meanwhile.",
+                            primary = (if (state.stockError.startsWith("Complete")) "Check now" else "Try again") to viewModel::retryStock,
                             secondary = "Show ship-to-home" to { viewModel.onModeChange(FulfillmentMode.SHIP) }
                         )
                     }
