@@ -58,7 +58,7 @@ data class WebShareState(
             ?: serverUrl
 
     /** Worth a look from the toolbar: failing, or working only through the fallback. */
-    val needsAttention: Boolean get() = status == Status.ERROR || (enabled && lastNote != null)
+    val needsAttention: Boolean get() = status == Status.ERROR || (enabled && lastNote != null && !pending)
 
     val status: Status
         get() = when {
@@ -178,7 +178,13 @@ class WebPublisher(
                 // GitHub didn't take it but the owner's own server is set up: use that rather than nothing.
                 if (viaGitHub.error != null && s.hasServer) {
                     val viaServer = publishToServer(s, buildPayload(items, savedAt, store, stockStoreId, stock))
-                    if (viaServer.error == null) Outcome(null, note = "GitHub: ${viaGitHub.error.trimEnd('.')}. Published to your server instead.") else viaGitHub
+                    if (viaServer.error == null) Outcome(
+                        null,
+                        // A passing GitHub problem is retried so the shared link catches up; a token problem needs the user.
+                        retryLater = viaGitHub.retryLater,
+                        note = if (viaGitHub.retryLater) "Published to your server; the GitHub copy will catch up"
+                        else "GitHub: ${viaGitHub.error.trimEnd('.')}. Published to your server instead."
+                    ) else viaGitHub
                 } else viaGitHub
             } else {
                 publishToServer(s, buildPayload(items, savedAt, store, stockStoreId, stock))
@@ -189,13 +195,13 @@ class WebPublisher(
         prefs.edit().putBoolean(K_PENDING, outcome.retryLater)
             .putString(K_ERROR, if (outcome.retryLater) null else outcome.error)
             .putString(K_NOTE, outcome.note)
-            .putString(K_PENDING_REASON, if (outcome.retryLater) outcome.error else null)
+            .putString(K_PENDING_REASON, if (outcome.retryLater) outcome.error ?: outcome.note else null)
             .apply { if (ok) putLong(K_LAST, now) }.apply()
         _state.update {
             it.copy(
                 isPublishing = false,
                 pending = outcome.retryLater,
-                pendingReason = if (outcome.retryLater) outcome.error else null,
+                pendingReason = if (outcome.retryLater) outcome.error ?: outcome.note else null,
                 lastError = if (outcome.retryLater) null else outcome.error,
                 lastNote = outcome.note,
                 lastPublishedAt = if (ok) now else it.lastPublishedAt

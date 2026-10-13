@@ -263,7 +263,7 @@ import {
         <p class="foot-note" data-ref="footNote"></p>
       </div>
       <div class="sheet-wrap" data-ref="sheetWrap" hidden><div class="sheet" data-ref="sheet" role="dialog" aria-modal="true"></div></div>
-      <div class="toast" data-ref="toast" hidden></div>
+      <div class="toast" data-ref="toast" role="status" aria-live="polite" hidden></div>
     </div>`;
   const ref = (n) => root.querySelector(`[data-ref="${n}"]`);
   const app = root.querySelector('.app');
@@ -355,7 +355,8 @@ import {
       status.hidden = state.loading;
       status.innerHTML = state.loading ? '' : statusHtml(state.blocked ? '🛡️' : '⚠️',
         state.blocked ? 'Quick check needed' : "Couldn't load deals", state.blocked ? 'Vitamin Shoppe wants to confirm a person is browsing. Tap Reload page, complete any check, and Deals reopens.' : esc(state.error || "Vitamin Shoppe didn't send any deals."),
-        [[state.blocked ? 'Reload page' : 'Try again', state.blocked ? 'reload-page' : 'refresh', true]]);
+        state.siteChanged ? [['Try again', 'refresh', false]] : [[state.blocked ? 'Reload page' : 'Try again', state.blocked ? 'reload-page' : 'refresh', true]]) +
+        (state.siteChanged ? `<div class="actions"><a class="primary-btn" href="${esc(__VSX_HOME__)}vs-clearance.user.js" target="_blank" rel="noopener">Update VS Clearance</a></div>` : '');
       return;
     }
     renderControls();
@@ -553,7 +554,7 @@ import {
       case 'clear-store':
         closeSheet();
         stockRun++; // a check still running for the old store must not report back
-        return update(() => { state.store = null; state.stock = null; state.mode = 'ship'; state.stockError = null; state.stockBlocked = false; put('stock', null); rebuild(); });
+        return update(() => { state.store = null; state.stock = null; state.mode = 'ship'; state.stockError = null; state.stockBlocked = false; state.stockLoading = false; put('stock', null); rebuild(); });
       case 'copy-prompt':
         try { await navigator.clipboard.writeText(promptText); toast('Prompt copied — paste it into your AI chat'); }
         catch { toast('Copy failed — open “Show prompt” and copy it manually.'); }
@@ -625,8 +626,18 @@ import {
     return true;
   }
 
+  /** The site's human check (DataDome) is showing instead of the store's page. */
+  function onCheckPage() {
+    // The check's own iframe, or DataDome's flag for a captcha/block page ('c'/'b'). Not a text search:
+    // this script's own source (injected into the page) would match that.
+    const dd = window.dd;
+    return !!document.querySelector('iframe[src*="captcha-delivery.com"]') || !!(dd && dd.host && (dd.rt === 'c' || dd.rt === 'b'));
+  }
+
   function mount() {
     if (!document.body) return setTimeout(mount, 50);
+    // Leave the check alone (and keep #vsdeals, so Deals opens when the page reloads after it).
+    if (onCheckPage()) return;
     document.body.appendChild(host);
     const paired = takePairing();
     // Coming in through #vsdeals brings a hidden Deals button back.

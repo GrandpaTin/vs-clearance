@@ -161,6 +161,7 @@ fun DealScreen(viewModel: DealViewModel, modifier: Modifier = Modifier) {
             onLater = viewModel::laterUpdate,
             onHide = viewModel::closeUpdate,
             onCancelDownload = viewModel::cancelUpdateDownload,
+            onOpenDownloadPage = { state.update.available?.let { openProductPage(context, it.pageUrl) } },
             onDismiss = viewModel::closeUpdate
         )
     }

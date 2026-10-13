@@ -114,6 +114,7 @@ h1 { font-size: 1.35rem; margin: 0; }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 8px; }
 .primary-btn { background: var(--navy); color: #fff; border: 0; border-radius: 999px; min-height: 44px; padding: 0 20px; font-weight: 700; }
 @media (prefers-color-scheme: dark) { .primary-btn { background: var(--sky); color: var(--navy-dark); } }
+a.primary-btn { display: inline-flex; align-items: center; text-decoration: none; }
 .outline-btn { background: transparent; border: 1px solid var(--outline); border-radius: 999px; min-height: 44px; padding: 0 18px; font-weight: 700; }
 .skeleton { height: 140px; border-radius: 16px; background: linear-gradient(90deg, var(--surface-2), var(--surface), var(--surface-2)); background-size: 200% 100%; animation: shimmer 1.4s infinite; }
 @keyframes shimmer { to { background-position: -200% 0; } }

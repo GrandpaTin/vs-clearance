@@ -48,6 +48,7 @@ async function load({ manual = false } = {}) {
   const before = state.error;
   const wasLoading = state.loading;
   const hadList = !!state.snapshot;
+  const previousPublished = state.snapshot?.publishedAt;
   let changed = true;
   try {
     const res = await fetch('api/snapshot', { headers: state.etag ? { 'If-None-Match': state.etag } : {}, cache: 'no-cache' });
@@ -69,7 +70,9 @@ async function load({ manual = false } = {}) {
     const snap = await res.json();
     acceptSnapshot(snap);
     state.error = fromCache ? 'offline' : null;
+    const sameList = hadList && previousPublished === snap.publishedAt;
     if (manual) toast(fromCache ? 'You’re offline · showing the last deals loaded'
+      : sameList ? (oldList() ? `No newer list yet — this one is from ${relativeTime(snap.savedAt || snap.publishedAt)}` : 'You’re up to date')
       : oldList() ? `Loaded · this list is from ${relativeTime(snap.savedAt || snap.publishedAt)}`
       : hadList ? 'Updated' : 'Deals loaded');
   } catch (e) {

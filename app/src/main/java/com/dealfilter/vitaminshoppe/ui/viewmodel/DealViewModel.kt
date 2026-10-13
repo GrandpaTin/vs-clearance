@@ -657,6 +657,8 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
     // -------------------------------------------------------------------------------------------
 
     override fun checkForUpdates() {
+        if (updater.state.value.isChecking) return
+        showMessage("Checking for updates…")
         viewModelScope.launch {
             val message = updater.check(force = true)
             if (message != null) showMessage(message) else if (updater.state.value.available != null) updater.openDialog()

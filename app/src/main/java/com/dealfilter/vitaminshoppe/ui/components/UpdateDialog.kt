@@ -33,6 +33,7 @@ fun UpdateDialog(
     onLater: () -> Unit,
     onHide: () -> Unit,
     onCancelDownload: () -> Unit,
+    onOpenDownloadPage: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val release = update.available ?: return
@@ -77,6 +78,7 @@ fun UpdateDialog(
                 // Keeps downloading in the background; the banner shows progress.
                 downloading -> Button(onClick = onHide) { Text("Hide") }
                 update.needsInstallPermission -> Button(onClick = onOpenSettings) { Text("Open settings") }
+                update.needsManualInstall -> Button(onClick = onOpenDownloadPage) { Text("Open download page") }
                 else -> Button(onClick = onUpdate) {
                     Text(
                         when {

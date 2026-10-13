@@ -4,7 +4,10 @@ const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'core.js', 'boot-chec
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: 'reload' })))
+    // Best effort: a missing or failed list mustn't stop the worker installing.
+    .then(() => fetch('api/snapshot', { cache: 'no-cache' }).then((r) => (r.ok ? c.put('api/snapshot', r) : null)).catch(() => null)))
+    .then(() => self.skipWaiting()));
 });
 
 // The page asks which version took over, so it only offers a reload when it's actually behind.

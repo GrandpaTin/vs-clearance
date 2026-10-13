@@ -50,6 +50,8 @@ data class UpdateState(
     val readyToInstall: Boolean = false,
     /** Android needs the one-time "install unknown apps" permission for this app first. */
     val needsInstallPermission: Boolean = false,
+    /** Retrying can't help (signed with another key, no installer): send the user to the download page. */
+    val needsManualInstall: Boolean = false,
     val error: String? = null,
     /** The user tapped "Later" on this version; don't show the banner for it again. */
     val dismissed: Boolean = false,
@@ -74,6 +76,7 @@ open class AppUpdater(
     /** Downloads belong to the app, not a screen: they survive the screen going away. */
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var downloadJob: Job? = null
+    @Volatile private var signerMismatch = false
 
     // The last release found survives the app being closed, so its banner is back on the next launch.
     private val _state = MutableStateFlow(
@@ -82,7 +85,7 @@ open class AppUpdater(
                 ?.let { runCatching { parseRelease(it) }.getOrNull() }
                 ?.takeIf { it.versionCode > currentVersionCode },
             dismissed = prefs.getInt(K_DISMISSED, 0).let { d -> d != 0 && d == (prefs.getString(K_RELEASE, null)?.let { runCatching { parseRelease(it)?.versionCode }.getOrNull() }) }
-        )
+        ).let { s -> s.copy(readyToInstall = s.available != null && File(File(context.cacheDir, "updates"), "VS-Clearance-update.apk").exists()) }
     )
     val state: StateFlow<UpdateState> = _state.asStateFlow()
 
@@ -109,6 +112,7 @@ open class AppUpdater(
         withContext(Dispatchers.IO) { deleteStaleDownload() }
         val release = result.getOrNull()?.first
         val newer = release?.takeIf { it.versionCode > currentVersionCode }
+        if (force && newer != null) prefs.edit().remove(K_DISMISSED).apply()
         val dismissedCode = prefs.getInt(K_DISMISSED, 0)
         _state.update {
             it.copy(
@@ -154,11 +158,12 @@ open class AppUpdater(
         val release = _state.value.available ?: return
         val haveFile = withContext(Dispatchers.IO) { apkFile.exists() && verifyMatchesInstalledApp(apkFile, release, exact = true) == null }
         if (!haveFile) {
-            _state.update { it.copy(progress = 0f, error = null, needsInstallPermission = false, readyToInstall = false) }
+            signerMismatch = false
+            _state.update { it.copy(progress = 0f, error = null, needsInstallPermission = false, needsManualInstall = false, readyToInstall = false) }
             try {
                 val error = withContext(Dispatchers.IO) { download(release) }
                 if (error != null) {
-                    _state.update { it.copy(error = error) }
+                    _state.update { it.copy(error = error, needsManualInstall = signerMismatch) }
                     return
                 }
             } finally {
@@ -194,7 +199,7 @@ open class AppUpdater(
             context.startActivity(intent)
             _state.update { it.copy(needsInstallPermission = false, error = null) }
         } catch (e: Exception) {
-            _state.update { it.copy(error = "Android couldn't open its installer. Download it from the website instead.") }
+            _state.update { it.copy(error = "Android couldn't open its installer. Get the update from the download page instead.", needsManualInstall = true) }
         }
     }
 
@@ -307,8 +312,9 @@ open class AppUpdater(
         if (exact && code != release.versionCode) return "An older download is cached."
         val installed = pm.getPackageInfo(context.packageName, flags)
         if (signers(downloaded) != signers(installed)) {
+            signerMismatch = true
             return "This update is signed with a different key than the app on your phone. " +
-                "Uninstall VS Clearance once and install it from ${release.pageUrl} — updates work in-app after that."
+                "Uninstall VS Clearance once, then install it from the download page — updates work in-app after that."
         }
         return null
     }
