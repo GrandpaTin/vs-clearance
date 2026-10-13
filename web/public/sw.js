@@ -7,6 +7,11 @@ self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
 
+// The page asks which version took over, so it only offers a reload when it's actually behind.
+self.addEventListener('message', (e) => {
+  if (e.data === 'version' && e.source) e.source.postMessage({ version: VERSION });
+});
+
 self.addEventListener('activate', (e) => {
   e.waitUntil(caches.keys()
     .then((keys) => Promise.all(keys.filter((k) => k !== VERSION).map((k) => caches.delete(k))))

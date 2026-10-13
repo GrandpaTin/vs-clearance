@@ -97,6 +97,7 @@ main { max-width: 900px; margin: 0 auto; padding: 0 0 16px; }
 .chip.more::after { content: " ▾"; margin-left: 4px; }
 .chip.more select { position: absolute; inset: 0; opacity: 0; width: 100%; cursor: pointer; font-size: 16px; }
 .chip.more:focus-within { outline: 3px solid var(--sky); outline-offset: 2px; }
+@media (min-width: 900px) and (hover: hover) { #to-search { display: none; } }
 #to-search svg { width: 22px; height: 22px; color: var(--muted); }
 .foot-note { text-align: center; color: var(--muted); font-size: .85rem; padding: 8px 16px calc(24px + env(safe-area-inset-bottom)); }
 .foot-note a { color: inherit; font-weight: 700; }

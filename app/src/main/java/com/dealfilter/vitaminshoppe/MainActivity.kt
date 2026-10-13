@@ -45,7 +45,8 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onStop() {
-        viewModel.onAppBackground()
+        // A rotation or theme change stops and restarts the activity; that isn't leaving the app.
+        if (!isChangingConfigurations) viewModel.onAppBackground() else viewModel.onConfigurationChanging()
         (application as VitaminShoppeApp).webSession.setForeground(false)
         super.onStop()
     }

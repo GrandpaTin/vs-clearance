@@ -51,10 +51,14 @@ jobs:
           # A new code version gets a new service worker, so open tabs offer "New version available".
           # (A new deals list redeploys the same commit, so it doesn't.)
           sed -i "s/const VERSION = '\([^']*\)';/const VERSION = '\1-${GITHUB_SHA::7}';/" _site/sw.js
+          sed -i "s/^const BUILD = 'dev';/const BUILD = '${GITHUB_SHA::7}';/" _site/app.js
           # Link previews need absolute URLs (the local server fills these in per request).
           find _site -name '*.html' -exec sed -i "s|{{BASE}}|$BASE|g" {} +
           mkdir -p _site/api _site/downloads
-          if git fetch --depth=1 origin deals 2>/dev/null; then
+          # No deals branch yet is fine (the page says "No deals shared yet"); one that exists but
+          # can't be read must fail the build rather than deploy a site that lost its list.
+          if git ls-remote --exit-code origin deals >/dev/null; then
+            git fetch --depth=1 origin deals
             git show FETCH_HEAD:snapshot.json > _site/api/snapshot
           fi
           git archive --format=zip --prefix=VS-Clearance/ -o _site/downloads/VS-Clearance-project.zip HEAD

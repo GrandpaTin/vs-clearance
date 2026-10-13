@@ -623,7 +623,7 @@ private fun Banners(state: DealUiState, viewModel: DealActions, now: Long) {
         val refresh = refreshNotice(state, now)
         val stockShown = state.stockError != null && !(state.mode == FulfillmentMode.PICKUP && state.visibleDeals.isEmpty())
         val updateWaits = refresh != null || stockShown
-        if (release != null && downloading == null && !state.update.isDialogOpen && state.update.error != null && !updateWaits) {
+        if (release != null && downloading == null && !state.update.isDialogOpen && state.update.error != null && !state.update.dismissed && !updateWaits) {
             Banner(
                 icon = Icons.Default.SystemUpdate,
                 text = "Update ${release.versionName} didn't download",
@@ -633,7 +633,7 @@ private fun Banners(state: DealUiState, viewModel: DealActions, now: Long) {
                 action = "Show",
                 onAction = viewModel::openUpdate
             )
-        } else if (release != null && state.update.readyToInstall && downloading == null && !state.update.isDialogOpen && !updateWaits) {
+        } else if (release != null && state.update.readyToInstall && downloading == null && !state.update.isDialogOpen && !state.update.dismissed && !updateWaits) {
             Banner(
                 icon = Icons.Default.SystemUpdate,
                 text = "Update ${release.versionName} downloaded",

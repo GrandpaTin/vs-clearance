@@ -152,6 +152,21 @@ class DealViewModelTest {
     }
 
     @Test
+    fun `leaving and coming straight back after a site error waits out the backoff`() {
+        saveList(ageMillis = 7 * 24 * 3600_000L)
+        app.fake = fakeSite { calls.incrementAndGet(); throw FetchException.Http(503) }
+        val vm = DealViewModel(app)
+        vm.onAppForeground()
+        vm.awaitState { it.loadError != null }
+        val afterFirst = calls.get()
+        vm.onAppBackground()
+        vm.onAppForeground()
+        Thread.sleep(300)
+        shadowOf(Looper.getMainLooper()).idle()
+        assertEquals("no immediate retry", afterFirst, calls.get())
+    }
+
+    @Test
     fun `an old list with no error yet is still flagged`() {
         val s = DealUiState(
             allDeals = VsApi.parseClearancePage(listing).items, status = LoadStatus.IDLE,

@@ -18,6 +18,8 @@ import {
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
   class Blocked extends Error {}
+  /** The site answered in a way this version doesn't understand: an update may fix it. */
+  class SiteChanged extends Error {}
 
   async function getJson(url) {
     let res;
@@ -34,9 +36,8 @@ import {
       throw new Blocked('Vitamin Shoppe wants to confirm a person is browsing.');
     }
     if (!res.ok && !isListingDespiteStatus(res.status, data)) {
-      throw new Error(res.status === 404
-        ? "Vitamin Shoppe's clearance search came back empty (404) — the site may have changed. Tap “Update VS Clearance” at the bottom."
-        : `Vitamin Shoppe answered ${res.status}.`);
+      if (res.status === 404 && url.includes('/search/product/search')) throw new SiteChanged("Vitamin Shoppe's clearance search changed.");
+      throw new Error(`Vitamin Shoppe answered ${res.status}.`);
     }
     return data;
   }
@@ -112,43 +113,60 @@ import {
       state.raw = raw; state.savedAt = Date.now();
       put('cache', { savedAt: state.savedAt, items: raw });
       rebuild();
-      // New & price drops vs the last list this browser loaded.
-      const before = Object.fromEntries(previous.map((d) => [d.id, bestPrice(d)]));
-      const diff = changes(before, state.items);
-      state.changes = diff.newIds.size || diff.drops.size ? diff : prune(state.changes, state.items);
+      // New & price drops vs the last COMPLETE list this browser loaded (a partial one would make
+      // everything it missed look new next time).
+      const before = get('baseline', null) || Object.fromEntries(previous.map((d) => [d.id, bestPrice(d)]));
+      if (partial) {
+        state.changes = prune(state.changes, state.items);
+      } else {
+        const diff = changes(before, state.items);
+        state.changes = diff.newIds.size || diff.drops.size ? diff : prune(state.changes, state.items);
+        put('baseline', Object.fromEntries(state.items.map((d) => [d.id, bestPrice(d)])));
+      }
       if (!state.changes.newIds.size && !state.changes.drops.size) state.onlyChanges = false;
       put('marks', { newIds: [...state.changes.newIds], drops: Object.fromEntries(state.changes.drops) });
-      if (state.store) loadStock(); else publish();
+      if (state.store) loadStock({ onlyMissing: !stockIsDue() }); else publish();
     } catch (e) {
-      state.error = e.message; state.blocked = e instanceof Blocked;
+      state.error = e.message; state.blocked = e instanceof Blocked; state.siteChanged = e instanceof SiteChanged;
     } finally {
       state.loading = false; render();
     }
   }
 
   let stockRun = 0;
-  async function loadStock() {
+  /** Shelf stock for the chosen store. With onlyMissing, fresh stock is kept and only new items are asked about. */
+  async function loadStock({ onlyMissing = false } = {}) {
     const store = state.store;
     if (!store || !state.raw.length) return;
     const run = ++stockRun;
+    const keep = onlyMissing && hasStock() ? state.stock : null;
+    let skus = [...new Set(state.raw.map((o) => o.jda).filter(Boolean))];
+    if (keep) skus = skus.filter((s) => !(s in keep.map));
+    if (keep && !skus.length) { publish(); return; }
     state.stockLoading = true; state.stockError = null; state.stockBlocked = false; render();
+    const map = keep ? { ...keep.map } : {};
     try {
-      const skus = [...new Set(state.raw.map((o) => o.jda).filter(Boolean))];
-      const map = {};
       for (let i = 0; i < skus.length; i += 100) {
         const batch = skus.slice(i, i + 100);
         Object.assign(map, Object.fromEntries(batch.map((s) => [s, 0])), parseInventory(await getJson(inventoryUrl(store.id, batch))));
       }
       if (run !== stockRun || state.store?.id !== store.id) return;
-      state.stock = { storeId: store.id, at: Date.now(), map };
+      state.stock = { storeId: store.id, at: keep ? keep.at : Date.now(), map };
       put('stock', state.stock);
       rebuild();
       publish();
     } catch (e) {
       if (run === stockRun) {
+        // Batches that did answer still count; items never reached stay "unknown".
+        if (Object.keys(map).length && state.store?.id === store.id) {
+          state.stock = { storeId: store.id, at: keep ? keep.at : Date.now(), map };
+          put('stock', state.stock);
+          rebuild();
+        }
         state.stockBlocked = e instanceof Blocked;
+        // 6. the title already says "Quick check needed"; the body says what for and what to do
         state.stockError = state.stockBlocked
-          ? `Quick check needed to read shelf stock at ${store.name}. Tap Reload page, complete any check, and Deals reopens.`
+          ? `Vitamin Shoppe wants to confirm a person is browsing before showing stock at ${store.name}. Tap Reload page, complete any check, and Deals reopens.`
           : `Couldn't check shelves at ${store.name}. ${e.message}`;
       }
     } finally {
@@ -298,6 +316,11 @@ import {
         : '<button class="link-btn" data-act="hide-launcher">Hide the 🏷️ Deals button</button>');
   }
 
+  const savedPhrase = () => {
+    const ago = relativeTime(state.savedAt);
+    return ago === 'just now' ? 'showing the list you just loaded' : `showing the list saved ${ago}`;
+  };
+
   function render() {
     if (!state.open) return;
     renderFootNote();
@@ -309,10 +332,12 @@ import {
 
     const banner = ref('banner');
     if (state.blocked && state.items.length) {
-      banner.innerHTML = `<div class="banner warn"><span><b>Quick check needed.</b> Vitamin Shoppe wants to confirm a person is browsing. Tap Reload page, complete any check, and Deals reopens. · Showing deals from ${relativeTime(state.savedAt)}.</span>
+      banner.innerHTML = `<div class="banner warn"><span><b>Quick check needed.</b> Vitamin Shoppe wants to confirm a person is browsing. Tap Reload page, complete any check, and Deals reopens. · ${savedPhrase().replace(/^s/, 'S')}.</span>
         <button class="text-btn" data-act="reload-page">Reload page</button></div>`;
     } else if (state.error && state.items.length) {
-      banner.innerHTML = `<div class="banner warn"><span><b>Couldn't refresh.</b> ${esc(state.error.replace(/\.$/, ''))} · showing deals from ${relativeTime(state.savedAt)}.</span><button class="text-btn" data-act="refresh">Retry</button></div>`;
+      banner.innerHTML = `<div class="banner warn"><span><b>Couldn't refresh.</b> ${esc(state.error.replace(/\.$/, ''))} · ${savedPhrase()}.</span>` +
+        (state.siteChanged ? `<a class="text-btn" href="${esc(__VSX_HOME__)}vs-clearance.user.js" target="_blank" rel="noopener">Update</a>` : '') +
+        '<button class="text-btn" data-act="refresh">Retry</button></div>';
     } else if (state.partialNote) {
       banner.innerHTML = `<div class="banner warn"><span>${esc(state.partialNote)}</span><button class="text-btn" data-act="refresh">Retry</button></div>`;
     } else if (state.stockError && !(state.mode === 'pickup' && !hasStock())) {
@@ -527,7 +552,8 @@ import {
       }
       case 'clear-store':
         closeSheet();
-        return update(() => { state.store = null; state.stock = null; state.mode = 'ship'; put('stock', null); rebuild(); });
+        stockRun++; // a check still running for the old store must not report back
+        return update(() => { state.store = null; state.stock = null; state.mode = 'ship'; state.stockError = null; state.stockBlocked = false; put('stock', null); rebuild(); });
       case 'copy-prompt':
         try { await navigator.clipboard.writeText(promptText); toast('Prompt copied — paste it into your AI chat'); }
         catch { toast('Copy failed — open “Show prompt” and copy it manually.'); }
@@ -560,14 +586,26 @@ import {
     clearTimeout(typing);
     typing = setTimeout(() => { state.query = value; render(); ref('scroll').scrollTop = 0; }, 120);
   });
-  root.addEventListener('keydown', (e) => {
-    if (e.key !== 'Escape') return;
+  ref('list').addEventListener('error', (e) => {
+    const img = e.target;
+    if (img.tagName !== 'IMG') return;
+    img.parentNode.classList.add('none');
+    img.replaceWith('📦');
+  }, true);
+
+  function onEscape(e) {
+    if (e.key !== 'Escape' || !state.open) return;
     const t = e.composedPath ? e.composedPath()[0] : e.target;
     if (t && t.matches && t.matches('[data-ref="q"]') && t.value) {
+      clearTimeout(typing); // a search still waiting to apply mustn't come back
       t.value = ''; state.query = ''; render(); return;
     }
     if (state.sheet) closeSheet(); else closeApp();
-  });
+  }
+  root.addEventListener('keydown', onEscape);
+  // After a click re-renders the clicked button (or a sheet closes), focus drops to the page,
+  // outside the overlay: catch Esc there too.
+  document.addEventListener('keydown', (e) => { if (!root.activeElement) onEscape(e); }, true);
   launcher.addEventListener('click', openApp);
 
   /** #vsdeals-share=<base64url {"url","token"}> from the owner's /setup page pairs this browser. */

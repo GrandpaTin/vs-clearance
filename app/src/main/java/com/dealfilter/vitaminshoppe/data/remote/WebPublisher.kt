@@ -148,8 +148,8 @@ class WebPublisher(
     }
 
     fun setEnabled(enabled: Boolean) {
-        prefs.edit().putBoolean(K_ENABLED, enabled).apply()
-        _state.update { it.copy(enabled = enabled, lastError = null) }
+        prefs.edit().putBoolean(K_ENABLED, enabled).remove(K_ERROR).remove(K_NOTE).apply()
+        _state.update { it.copy(enabled = enabled, lastError = null, lastNote = null) }
     }
 
     private class Outcome(val error: String?, val retryLater: Boolean = false, val note: String? = null)
@@ -173,7 +173,7 @@ class WebPublisher(
                 } catch (e: IOException) {
                     Outcome("Will sync when online", retryLater = true)
                 } catch (e: Exception) {
-                    Outcome("GitHub sent an unexpected reply. Try again in a minute.")
+                    Outcome("GitHub sent an unexpected reply; it will try again on the next sync", retryLater = true)
                 }
                 // GitHub didn't take it but the owner's own server is set up: use that rather than nothing.
                 if (viaGitHub.error != null && s.hasServer) {
@@ -247,17 +247,17 @@ class WebPublisher(
             JSONObject().put("path", "snapshot.json").put("mode", "100644").put("type", "blob").put("content", payload)
         ))
         val (treeCode, treeBody) = gitHub("POST", "$git/trees", token, tree)
-        if (treeCode !in 200..299) return Outcome(gitHubError(treeCode, owner, name))
+        if (treeCode !in 200..299) return gitHubFailure(treeCode, treeBody, owner, name)
         val commit = JSONObject().put("message", "Deals update").put("tree", treeBody!!.getString("sha"))
             .put("parents", JSONArray()).put("author", who).put("committer", who)
         val (commitCode, commitBody) = gitHub("POST", "$git/commits", token, commit)
-        if (commitCode !in 200..299) return Outcome(gitHubError(commitCode, owner, name))
+        if (commitCode !in 200..299) return gitHubFailure(commitCode, commitBody, owner, name)
         val sha = commitBody!!.getString("sha")
-        val (refCode, _) = gitHub("PATCH", "$git/refs/heads/deals", token, JSONObject().put("sha", sha).put("force", true))
+        val (refCode, refBody) = gitHub("PATCH", "$git/refs/heads/deals", token, JSONObject().put("sha", sha).put("force", true))
         if (refCode !in 200..299) {
             // First publish: the branch doesn't exist yet.
-            val (newCode, _) = gitHub("POST", "$git/refs", token, JSONObject().put("ref", "refs/heads/deals").put("sha", sha))
-            if (newCode !in 200..299) return Outcome(gitHubError(newCode, owner, name))
+            val (newCode, newBody) = gitHub("POST", "$git/refs", token, JSONObject().put("ref", "refs/heads/deals").put("sha", sha))
+            if (newCode !in 200..299) return gitHubFailure(newCode, newBody ?: refBody, owner, name)
         }
         // Rebuild the site from main (a push to `deals` alone runs no workflow).
         val (kick, _) = gitHub("POST", "https://api.github.com/repos/$owner/$name/dispatches", token, JSONObject().put("event_type", "deals"))
@@ -265,11 +265,17 @@ class WebPublisher(
         return if (kick in 200..299) Outcome(null) else Outcome("Saved; the site will rebuild on the next sync", retryLater = true)
     }
 
-    private fun gitHubError(code: Int, owner: String, name: String): String = when (code) {
-        401 -> "GitHub rejected the token — it may have expired. Make a new one with Contents: Read and write."
-        403, 404 -> "This token can't write to $owner/$name. Give it access to that repo with Contents: Read and write."
-        422 -> "GitHub couldn't save the list (422). Try again in a minute."
-        else -> "GitHub answered $code."
+    /** Outages and rate limits retry by themselves; only a real permission problem asks about the token. */
+    private fun gitHubFailure(code: Int, body: JSONObject?, owner: String, name: String): Outcome {
+        val rateLimited = code == 429 || (code == 403 && body?.optString("message").orEmpty().contains("rate limit", ignoreCase = true))
+        return when {
+            rateLimited -> Outcome("GitHub is busy; it will sync shortly", retryLater = true)
+            code >= 500 -> Outcome("Will sync when GitHub is back", retryLater = true)
+            code == 401 -> Outcome("GitHub rejected the token — it may have expired. Make a new one with Contents: Read and write.")
+            code == 403 || code == 404 -> Outcome("This token can't write to $owner/$name. Give it access to that repo with Contents: Read and write.")
+            code == 422 -> Outcome("GitHub couldn't save the list (422). It will try again on the next sync.", retryLater = true)
+            else -> Outcome("GitHub answered $code. It will try again on the next sync.", retryLater = true)
+        }
     }
 
     private fun gitHub(method: String, url: String, token: String, body: JSONObject): Pair<Int, JSONObject?> {

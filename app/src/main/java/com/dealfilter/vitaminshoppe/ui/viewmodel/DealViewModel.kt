@@ -78,6 +78,7 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
     /** Automatic retries after a failed refresh, spaced out so a struggling site isn't hammered. */
     private var autoRetryJob: Job? = null
     private var autoFailures = 0
+    private var lastFailureAt = 0L
 
     /** When the user closed the site's check; automatic refreshes leave them alone for a while after. */
     private var verificationDeclinedAt = 0L
@@ -118,7 +119,18 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
     // -------------------------------------------------------------------------------------------
 
     /** The app came into view: refresh if the list is missing or older than [STALE_AFTER_MS]. */
+    private var configChanging = false
+
+    /** The activity is being recreated (rotation, theme): keep timers and skip the "came back" checks. */
+    fun onConfigurationChanging() {
+        configChanging = true
+    }
+
     fun onAppForeground() {
+        if (configChanging) {
+            configChanging = false
+            return
+        }
         inForeground = true
         updater.inForeground = true
         updater.onReturnedToApp()
@@ -141,8 +153,9 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
         val s = _uiState.value
         if (loadJob?.isActive == true || s.isVerificationVisible) return false
         if (now - verificationDeclinedAt < STALE_AFTER_MS) return false
-        // The last attempt failed (offline, site error): try again however recent the list is.
-        if (s.loadError != null) return true
+        // The last attempt failed: try again however recent the list is. A site error waits out at least
+        // the first backoff step, so repeated returns can't hammer a struggling site; offline is local.
+        if (s.loadError != null) return s.loadErrorIsOffline || now - lastFailureAt >= RETRY_DELAYS_MS[0]
         val updated = s.lastUpdatedMillis ?: return true
         return now - updated >= STALE_AFTER_MS
     }
@@ -260,9 +273,10 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
                     it.copy(status = LoadStatus.IDLE, loadError = e.message, loadErrorIsOffline = e is FetchException.Offline)
                 }
                 // Offline waits for the network to come back instead of a timer.
-                if (e !is FetchException.Offline) scheduleAutoRetry()
+                if (e !is FetchException.Offline) { lastFailureAt = System.currentTimeMillis(); scheduleAutoRetry() }
             } catch (e: Exception) {
                 _uiState.update { it.copy(status = LoadStatus.IDLE, loadError = "Something went wrong loading deals. Please try again.") }
+                lastFailureAt = System.currentTimeMillis()
                 scheduleAutoRetry()
             }
         }

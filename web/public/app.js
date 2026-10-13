@@ -7,6 +7,8 @@ import {
 document.documentElement.dataset.booted = '1';
 
 const $ = (id) => document.getElementById(id);
+// Stamped with the commit by the Pages build (same stamp as sw.js's VERSION); 'dev' when served locally.
+const BUILD = 'dev';
 // Desktop browsers expose navigator.share too, but there the expected action is a copy.
 const nativeShare = !!navigator.share && /iphone|ipad|ipod|android/i.test(navigator.userAgent);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -55,7 +57,10 @@ async function load({ manual = false } = {}) {
       if (manual) toast(oldList() ? `No newer list yet — this one is from ${relativeTime(state.snapshot.savedAt || state.snapshot.publishedAt)}` : 'You’re up to date');
       return;
     }
-    if (res.status === 404) { state.snapshot = null; state.error = 'empty'; return; }
+    if (res.status === 404) {
+      if (state.snapshot) throw new Error('HTTP 404'); // keep the list; say the check failed
+      state.snapshot = null; state.error = 'empty'; return;
+    }
     if (!res.ok) throw new Error('HTTP ' + res.status);
     // The service worker answers with its saved copy when the network is down.
     const fromCache = res.headers.get('X-From-Cache') === '1';
@@ -184,7 +189,10 @@ function renderHeader() {
   }
   else if (snap && Date.now() - (snap.savedAt || snap.publishedAt) > 36 * 3600e3) {
     banner.hidden = false;
-    banner.innerHTML = `<span>This shared list is from ${relativeTime(snap.savedAt || snap.publishedAt)} — prices may have changed. <a href="get/">Get the app</a> for live prices anytime.</span>`;
+    const age = relativeTime(snap.savedAt || snap.publishedAt);
+    banner.innerHTML = introWanted
+      ? `<span><b>Clearance deals, shared with you</b> · this list is from ${age} — prices may have changed. <a href="get/">Get the free app</a> for live prices at your store.</span>`
+      : `<span>This shared list is from ${age} — prices may have changed. <a href="get/">Get the app</a> for live prices anytime.</span>`;
   } else banner.hidden = true;
   // The banner's Try again was pressed and it went away: land somewhere sensible, not on <body>.
   if (hadFocus && (banner.hidden || !banner.contains(document.activeElement))) {
@@ -608,9 +616,22 @@ if ('serviceWorker' in navigator) {
     document.addEventListener('visibilitychange', check);
   }).catch(() => {});
   navigator.serviceWorker.addEventListener('controllerchange', () => {
-    if (hadWorker) { $('update-banner').hidden = false; renderHeader(); }
+    const offer = hadWorker;
     hadWorker = true; // the first worker taking over isn't news; the next one is
+    if (!offer) return;
+    // The page usually already runs the new code (the worker fetches network-first); ask the
+    // new worker which version it is and only offer a reload when this page is older.
+    if (BUILD === 'dev' || !navigator.serviceWorker.controller) { showUpdate(); return; }
+    navigator.serviceWorker.controller.postMessage('version');
   });
+  navigator.serviceWorker.addEventListener('message', (e) => {
+    const v = e.data && e.data.version;
+    if (typeof v === 'string' && !v.endsWith('-' + BUILD)) showUpdate();
+  });
+}
+function showUpdate() {
+  $('update-banner').hidden = false;
+  renderHeader();
 }
 
 render();

@@ -101,6 +101,11 @@ open class AppUpdater(
             _state.update { it.copy(isChecking = false) }
             return@withLock if (result.exceptionOrNull() is IOException) "Couldn't check for updates — you're offline." else "Couldn't check for updates right now."
         }
+        if (downloadJob?.isActive == true) {
+            // Finish the download in progress; a newer release is offered on the next check.
+            _state.update { it.copy(isChecking = false) }
+            return@withLock null
+        }
         withContext(Dispatchers.IO) { deleteStaleDownload() }
         val release = result.getOrNull()?.first
         val newer = release?.takeIf { it.versionCode > currentVersionCode }
@@ -129,7 +134,7 @@ open class AppUpdater(
     /** "Later": hide this version's banner until a newer one or a manual check. */
     fun dismiss() {
         _state.value.available?.let { prefs.edit().putInt(K_DISMISSED, it.versionCode).apply() }
-        _state.update { it.copy(isDialogOpen = false, dismissed = true) }
+        _state.update { it.copy(isDialogOpen = false, dismissed = true, error = null) }
     }
 
     fun startDownloadAndInstall() {

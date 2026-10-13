@@ -4,6 +4,8 @@ setTimeout(function () {
   if (document.documentElement.dataset.booted) return;
   var intro = document.getElementById('intro');
   if (intro) intro.hidden = true;
+  var search = document.querySelector('.search');
+  if (search) search.hidden = true;
   document.getElementById('list').innerHTML = '';
   var box = document.getElementById('status');
   box.hidden = false;
