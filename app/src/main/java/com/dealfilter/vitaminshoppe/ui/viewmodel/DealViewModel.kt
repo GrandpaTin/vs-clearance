@@ -137,7 +137,10 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
         viewModelScope.launch {
             restoreJob.join()
             if (isRefreshDue(System.currentTimeMillis())) refreshInternal(auto = true)
-            else if (publisher.state.value.pending) shareIfOn()
+            else {
+                retryStockIfFailed()
+                if (publisher.state.value.pending) shareIfOn()
+            }
         }
         // At most once a day; quiet unless there's something new.
         viewModelScope.launch { updater.check() }
@@ -167,9 +170,18 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
         val now = System.currentTimeMillis()
         val offlineRetry = s.loadErrorIsOffline && !s.isVerificationVisible && now - verificationDeclinedAt >= STALE_AFTER_MS
         if (inForeground && (offlineRetry || isRefreshDue(now))) refreshInternal(auto = true)
+        else if (inForeground) retryStockIfFailed()
         // A list that couldn't be shared earlier goes out now (a refresh above publishes it anyway).
         val share = publisher.state.value
         if (share.pending && share.enabled && loadJob?.isActive != true) publishCurrent(announce = false)
+    }
+
+    /** Shelf stock that failed to load (no signal, site hiccup) is tried again; a pending human check waits for the user. */
+    private fun retryStockIfFailed() {
+        val s = _uiState.value
+        val store = s.selectedStore ?: return
+        if (s.stockError == null || stockJob?.isActive == true || afterVerification.containsKey("stock") || s.isVerificationVisible) return
+        startStockLoad(store)
     }
 
     private fun scheduleAutoRetry() {

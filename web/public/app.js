@@ -43,6 +43,8 @@ function savePrefs() {
 
 // ------------------------------------------------------------------- data
 
+let quietFailures = 0;
+
 async function load({ manual = false } = {}) {
   $('refresh').classList.add('spin');
   const before = state.error;
@@ -54,6 +56,7 @@ async function load({ manual = false } = {}) {
     const res = await fetch('api/snapshot', { headers: state.etag ? { 'If-None-Match': state.etag } : {}, cache: 'no-cache' });
     if (res.status === 304) {
       state.error = null;
+      quietFailures = 0;
       changed = false;
       if (manual) toast(oldList() ? `No newer list yet — this one is from ${relativeTime(state.snapshot.savedAt || state.snapshot.publishedAt)}` : 'You’re up to date');
       return;
@@ -69,6 +72,7 @@ async function load({ manual = false } = {}) {
     if (!fromCache) state.etag = res.headers.get('ETag');
     const snap = await res.json();
     acceptSnapshot(snap);
+    quietFailures = 0;
     state.error = fromCache ? 'offline' : null;
     const sameList = hadList && previousPublished === snap.publishedAt;
     if (manual) toast(fromCache ? 'You’re offline · showing the last deals loaded'
@@ -76,7 +80,12 @@ async function load({ manual = false } = {}) {
       : oldList() ? `Loaded · this list is from ${relativeTime(snap.savedAt || snap.publishedAt)}`
       : hadList ? 'Updated' : 'Deals loaded');
   } catch (e) {
-    state.error = navigator.onLine === false ? 'offline' : 'failed';
+    const failure = navigator.onLine === false ? 'offline' : 'failed';
+    if (!manual && state.snapshot && failure === 'failed' && ++quietFailures < 2) {
+      changed = false;
+      return; // flaky mobile data: wait for the next check before warning
+    }
+    state.error = failure;
     // The banner says it; a toast is only needed when the banner was already up (nothing visibly changes).
     if (manual && state.snapshot && before === state.error) toast(state.error === 'offline' ? 'Still offline' : 'Still couldn’t check for updates');
     changed = !state.snapshot;
@@ -186,16 +195,23 @@ function renderHeader() {
   if (!$('update-banner').hidden) { banner.hidden = true; return; }
   if (snap && state.error) {
     banner.hidden = false;
-    banner.innerHTML = `<span>${state.error === 'offline' ? 'You’re offline' : 'Couldn’t check for updates'} · showing the last deals loaded.</span>` +
+    const shown = oldList() ? `showing the list from ${relativeTime(snap.savedAt || snap.publishedAt)} — prices may have changed` : 'showing the last deals loaded';
+    banner.innerHTML = `<span>${state.error === 'offline' ? 'You’re offline' : 'Couldn’t check for updates'} · ${shown}.</span>` +
       '<button class="text-btn" type="button" data-act="refresh">Try again</button>';
     if (hadFocus) banner.querySelector('button').focus();
   }
   else if (snap && Date.now() - (snap.savedAt || snap.publishedAt) > 36 * 3600e3) {
     banner.hidden = false;
     const age = relativeTime(snap.savedAt || snap.publishedAt);
-    banner.innerHTML = introWanted
-      ? `<span><b>Clearance deals, shared with you</b> · this list is from ${age} — prices may have changed. <a href="get/">Get the free app</a> for live prices at your store.</span>`
-      : `<span>This shared list is from ${age} — prices may have changed. <a href="get/">Get the app</a> for live prices anytime.</span>`;
+    if (store.get('staleAck', null) === snap.publishedAt) {
+      // Already acknowledged: one quiet line until a newer list arrives.
+      banner.innerHTML = `<span>List from ${age} · prices may have changed</span>`;
+    } else {
+      banner.innerHTML = (introWanted
+        ? `<span><b>Clearance deals, shared with you</b> · this list is from ${age} — prices may have changed. <a href="get/">Get the free app</a> for live prices at your store.</span>`
+        : `<span>This shared list is from ${age} — prices may have changed. <a href="get/">Get the app</a> for live prices anytime.</span>`) +
+        '<button class="text-btn" type="button" data-act="stale-ok">Got it</button>';
+    }
   } else banner.hidden = true;
   // The banner's Try again was pressed and it went away: land somewhere sensible, not on <body>.
   if (hadFocus && (banner.hidden || !banner.contains(document.activeElement))) {
@@ -448,6 +464,12 @@ document.addEventListener('click', async (e) => {
     case 'get': location.href = 'get/'; return;
     case 'refresh': return load({ manual: true });
     case 'reload': location.reload(); return;
+    case 'stale-ok':
+      store.set('staleAck', state.snapshot?.publishedAt ?? null);
+      if (introWanted) { introWanted = false; store.set('introDismissed', true); }
+      renderHeader();
+      $('q').focus({ preventScroll: true });
+      return;
     case 'share': return shareDeal(state.items.find((d) => d.id === el.dataset.id));
   }
 });
@@ -605,6 +627,8 @@ $('install-dismiss').addEventListener('click', () => {
 
 // keep fresh: poll while visible, and immediately when the app comes back
 setInterval(() => { if (document.visibilityState === 'visible') load(); }, 60_000);
+window.addEventListener('online', () => load());
+window.addEventListener('offline', () => { if (state.snapshot) { state.error = 'offline'; renderHeader(); } });
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') load(); });
 setInterval(() => { if (state.snapshot && document.visibilityState === 'visible') renderHeader(); }, 60_000);
 

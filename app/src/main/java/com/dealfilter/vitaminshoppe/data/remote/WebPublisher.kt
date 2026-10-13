@@ -132,11 +132,16 @@ class WebPublisher(
 
     /** Saves both targets from the sheet. Blank fields clear that target. */
     fun configure(gitHubRepo: String, gitHubToken: String, serverUrl: String, serverToken: String, enabled: Boolean) {
-        prefs.edit()
+        val before = _state.value
+        val changed = normalizeUrl(gitHubRepo) != before.gitHubRepo || gitHubToken.trim() != before.gitHubToken ||
+            normalizeUrl(serverUrl) != before.serverUrl || serverToken.trim() != before.serverToken
+        val edit = prefs.edit()
             .putString(K_GH_REPO, normalizeUrl(gitHubRepo)).putString(K_GH_TOKEN, gitHubToken.trim())
             .putString(K_SRV_URL, normalizeUrl(serverUrl)).putString(K_SRV_TOKEN, serverToken.trim())
             .putBoolean(K_ENABLED, enabled)
-            .apply()
+        // An old "token rejected" error belongs to the old settings; the next sync reports on the new ones.
+        if (changed) edit.remove(K_ERROR).remove(K_NOTE)
+        edit.apply()
         _state.update { readState().copy(lastPublishedAt = it.lastPublishedAt, pending = it.pending) }
     }
 

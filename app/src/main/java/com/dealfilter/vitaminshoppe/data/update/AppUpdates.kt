@@ -85,8 +85,16 @@ open class AppUpdater(
                 ?.let { runCatching { parseRelease(it) }.getOrNull() }
                 ?.takeIf { it.versionCode > currentVersionCode },
             dismissed = prefs.getInt(K_DISMISSED, 0).let { d -> d != 0 && d == (prefs.getString(K_RELEASE, null)?.let { runCatching { parseRelease(it)?.versionCode }.getOrNull() }) }
-        ).let { s -> s.copy(readyToInstall = s.available != null && File(File(context.cacheDir, "updates"), "VS-Clearance-update.apk").exists()) }
+        )
     )
+
+    init {
+        val release = _state.value.available
+        if (release != null) scope.launch {
+            val ready = withContext(Dispatchers.IO) { apkFile.exists() && verifyMatchesInstalledApp(apkFile, release, exact = true) == null }
+            if (ready) _state.update { if (it.available?.versionCode == release.versionCode) it.copy(readyToInstall = true) else it }
+        }
+    }
     val state: StateFlow<UpdateState> = _state.asStateFlow()
 
     private val apkFile: File get() = File(File(context.cacheDir, "updates").apply { mkdirs() }, "VS-Clearance-update.apk")

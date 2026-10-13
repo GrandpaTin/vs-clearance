@@ -623,7 +623,7 @@ private fun Banners(state: DealUiState, viewModel: DealActions, now: Long) {
         val downloading = state.update.progress
         val refresh = refreshNotice(state, now)
         val stockShown = state.stockError != null && !(state.mode == FulfillmentMode.PICKUP && state.visibleDeals.isEmpty())
-        val updateWaits = refresh != null || stockShown
+        val updateWaits = refresh?.kind == RefreshNotice.Kind.STALE || stockShown
         if (release != null && downloading == null && !state.update.isDialogOpen && state.update.error != null && !state.update.dismissed && !updateWaits) {
             Banner(
                 icon = Icons.Default.SystemUpdate,

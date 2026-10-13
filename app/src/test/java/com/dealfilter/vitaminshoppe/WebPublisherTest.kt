@@ -103,6 +103,16 @@ class WebPublisherTest {
     }
 
     @Test
+    fun `saving new credentials clears the old error`() {
+        prefs.edit().putString("error", "GitHub rejected the token").putString("gh_repo", "https://github.com/me/deals").putString("gh_token", "old-token-0123456789").commit()
+        val p = publisher()
+        assertEquals(WebShareState.Status.ERROR, p.state.value.copy(enabled = true).status)
+        p.configure("github.com/me/deals", "new-token-0123456789", "", "", true)
+        assertNull(p.state.value.lastError)
+        assertFalse(prefs.contains("error"))
+    }
+
+    @Test
     fun `GitHub targets are recognised`() {
         assertEquals("GrandpaTin" to "vs-clearance", WebPublisher.gitHubRepo("github.com/GrandpaTin/vs-clearance"))
         assertEquals("a" to "b.c", WebPublisher.gitHubRepo("https://github.com/a/b.c.git/"))

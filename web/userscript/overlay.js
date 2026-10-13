@@ -377,6 +377,13 @@ import {
         [[state.stockBlocked ? 'Reload page' : 'Try again', state.stockBlocked ? 'reload-page' : 'retry-stock', true], ['Show ship-to-home', 'ship']]);
       return;
     }
+    if (!deals.length && state.mode === 'pickup' && state.stockError && hasStock()) {
+      list.innerHTML = ''; status.hidden = false;
+      status.innerHTML = statusHtml('🏬', "Couldn't re-check shelves",
+        `Nothing matched in the stock checked ${relativeTime(state.stock.at)} — it may have changed since.`,
+        [[state.stockBlocked ? 'Reload page' : 'Try again', state.stockBlocked ? 'reload-page' : 'retry-stock', true], ['Show ship-to-home', 'ship']]);
+      return;
+    }
     if (!deals.length) { list.innerHTML = ''; status.hidden = false; status.innerHTML = noMatchesHtml(); return; }
     status.hidden = true;
     list.innerHTML = deals.map(cardHtml).join('');
@@ -604,6 +611,17 @@ import {
     if (state.sheet) closeSheet(); else closeApp();
   }
   root.addEventListener('keydown', onEscape);
+  root.addEventListener('keydown', (e) => {
+    if (e.key !== 'Tab' || !state.open) return;
+    const box = state.sheet ? ref('sheet') : app;
+    const items = [...box.querySelectorAll('a[href], button:not([disabled]), input, select, textarea, [tabindex]:not([tabindex="-1"])')]
+      .filter((el) => el.offsetParent !== null);
+    if (!items.length) return;
+    const first = items[0], last = items[items.length - 1];
+    const active = root.activeElement;
+    if (e.shiftKey && (active === first || !box.contains(active))) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && (active === last || !box.contains(active))) { e.preventDefault(); first.focus(); }
+  });
   // After a click re-renders the clicked button (or a sheet closes), focus drops to the page,
   // outside the overlay: catch Esc there too.
   document.addEventListener('keydown', (e) => { if (!root.activeElement) onEscape(e); }, true);
@@ -628,10 +646,10 @@ import {
 
   /** The site's human check (DataDome) is showing instead of the store's page. */
   function onCheckPage() {
-    // The check's own iframe, or DataDome's flag for a captcha/block page ('c'/'b'). Not a text search:
-    // this script's own source (injected into the page) would match that.
+    // The check's own iframe, or DataDome's page object (only check pages define dd.host: captcha 'c',
+    // block 'b', automatic device check 'i'). Not a text search: this script's own source would match.
     const dd = window.dd;
-    return !!document.querySelector('iframe[src*="captcha-delivery.com"]') || !!(dd && dd.host && (dd.rt === 'c' || dd.rt === 'b'));
+    return !!document.querySelector('iframe[src*="captcha-delivery.com"]') || !!(dd && dd.host);
   }
 
   function mount() {
@@ -639,6 +657,12 @@ import {
     // Leave the check alone (and keep #vsdeals, so Deals opens when the page reloads after it).
     if (onCheckPage()) return;
     document.body.appendChild(host);
+    // The automatic check can add its frame just after load: step aside if it does.
+    setTimeout(() => {
+      if (!onCheckPage()) return;
+      host.remove();
+      document.documentElement.style.overflow = '';
+    }, 1500);
     const paired = takePairing();
     // Coming in through #vsdeals brings a hidden Deals button back.
     if (location.hash === '#vsdeals') put('launcher', true);
