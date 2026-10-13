@@ -31,9 +31,17 @@ import {
     if (res.status === 403) throw new Blocked('Vitamin Shoppe wants to confirm a person is browsing.');
     if (!res.ok && res.status !== 404) throw new Error(`Vitamin Shoppe answered ${res.status}.`);
     let data;
-    try { data = await res.json(); } catch {
-      if (!res.ok) throw new Error(`Vitamin Shoppe answered ${res.status}.`);
-      throw new Blocked('Vitamin Shoppe wants to confirm a person is browsing.');
+    const text = await res.text().catch(() => '');
+    try { data = JSON.parse(text); } catch {
+      if (res.status === 404) {
+        if (url.includes('/search/product/search')) throw new Error('Vitamin Shoppe sent an empty clearance list.');
+        if (url.includes('get-stores-with-inv')) throw new Error('Store search is unavailable right now. Try again in a minute.');
+        throw new Error('Vitamin Shoppe didn\'t answer as expected.');
+      }
+      // A page instead of data: DataDome's check is a person-check; anything else (Wi-Fi login,
+      // maintenance page) isn't, and "Reload page" wouldn't help.
+      if (res.headers.get('x-datadome') || /captcha-delivery|datadome/i.test(text)) throw new Blocked('Vitamin Shoppe wants to confirm a person is browsing.');
+      throw new Error('Vitamin Shoppe sent an unexpected page.');
     }
     if (!res.ok && !isListingDespiteStatus(res.status, data)) {
       if (res.status === 404 && url.includes('/search/product/search')) {
@@ -129,13 +137,18 @@ import {
       }
       if (!state.changes.newIds.size && !state.changes.drops.size) state.onlyChanges = false;
       put('marks', { newIds: [...state.changes.newIds], drops: Object.fromEntries(state.changes.drops) });
+      errorRetries = 0;
       if (state.store) loadStock({ onlyMissing: !stockIsDue() }); else publish();
     } catch (e) {
       state.error = e.message; state.blocked = e instanceof Blocked; state.siteChanged = e instanceof SiteChanged;
+      if (!state.blocked && !state.siteChanged) nextErrorRetry = Date.now() + Math.min(15 * 2 ** errorRetries++, 120) * 60_000;
     } finally {
       state.loading = false; render();
     }
   }
+
+  // Gentle automatic retries while the overlay sits open on an error: 15 min, 30, 60, then every 2 h.
+  let errorRetries = 0, nextErrorRetry = 0, stockRetries = 0, nextStockRetry = 0;
 
   let stockRun = 0;
   /** Shelf stock for the chosen store. With onlyMissing, fresh stock is kept and only new items are asked about. */
@@ -144,34 +157,45 @@ import {
     if (!store || !state.raw.length) return;
     const run = ++stockRun;
     const keep = onlyMissing && hasStock() ? state.stock : null;
+    // A full re-check starts from the old counts so batches it never reaches keep their last value.
+    const prev = !keep && hasStock() ? state.stock : null;
     let skus = [...new Set(state.raw.map((o) => o.jda).filter(Boolean))];
+    const total = skus.length;
     if (keep) skus = skus.filter((s) => !(s in keep.map));
     if (keep && !skus.length) { publish(); return; }
     state.stockLoading = true; state.stockError = null; state.stockBlocked = false; render();
-    const map = keep ? { ...keep.map } : {};
+    const map = keep ? { ...keep.map } : prev ? { ...prev.map } : {};
+    let reached = 0;
     try {
       for (let i = 0; i < skus.length; i += 100) {
         const batch = skus.slice(i, i + 100);
         Object.assign(map, Object.fromEntries(batch.map((s) => [s, 0])), parseInventory(await getJson(inventoryUrl(store.id, batch))));
+        reached += batch.length;
       }
       if (run !== stockRun || state.store?.id !== store.id) return;
       state.stock = { storeId: store.id, at: keep ? keep.at : Date.now(), map };
       put('stock', state.stock);
+      stockRetries = 0;
       rebuild();
       publish();
     } catch (e) {
       if (run === stockRun) {
         // Batches that did answer still count; items never reached stay "unknown".
-        if (Object.keys(map).length && state.store?.id === store.id) {
-          state.stock = { storeId: store.id, at: keep ? keep.at : Date.now(), map };
+        // (partial: stays "due", so the rest is asked for again)
+        if (reached && state.store?.id === store.id) {
+          state.stock = { storeId: store.id, at: keep ? keep.at : prev ? prev.at : Date.now(), map, partial: true };
           put('stock', state.stock);
           rebuild();
         }
         state.stockBlocked = e instanceof Blocked;
-        // 6. the title already says "Quick check needed"; the body says what for and what to do
+        if (!state.stockBlocked) nextStockRetry = Date.now() + Math.min(15 * 2 ** stockRetries++, 120) * 60_000;
+        const missing = skus.length - reached;
+        const connection = /offline|couldn't reach/i.test(e.message);
+        // the title already says "Quick check needed"; the body says what for and what to do
         state.stockError = state.stockBlocked
           ? `Vitamin Shoppe wants to confirm a person is browsing before showing stock at ${store.name}. Tap Reload page, complete any check, and Deals reopens.`
-          : `${e.message.replace(/\.?$/, '.')} Check your connection and try again.`;
+          : (reached ? `Shelf stock is missing for ${missing} of ${total} items. ` : '') +
+            `${e.message.replace(/\.?$/, '.')} ${connection ? 'Check your connection and try again.' : 'Try again in a minute.'}`;
       }
     } finally {
       if (run === stockRun) { state.stockLoading = false; render(); }
@@ -234,6 +258,12 @@ import {
     } finally {
       storeSearch.searching = false; renderSheet();
     }
+    // Say how many were found and put focus on the first, for keyboard and screen-reader users.
+    if (!storeSearch.message && storeSearch.results.length && state.sheet === 'stores') {
+      toast(`${storeSearch.results.length} store${storeSearch.results.length === 1 ? '' : 's'} found`);
+      const first = ref('sheet').querySelector('.store');
+      if (first) first.focus({ preventScroll: true });
+    }
   }
 
   // ------------------------------------------------------------------- UI shell
@@ -266,22 +296,27 @@ import {
         <div class="share-line" data-ref="shareLine" hidden></div>
         <p class="foot-note" data-ref="footNote"></p>
       </div>
-      <div class="sheet-wrap" data-ref="sheetWrap" hidden><div class="sheet" data-ref="sheet" role="dialog" aria-modal="true"></div></div>
+      <div class="sheet-wrap" data-ref="sheetWrap" hidden><div class="sheet" data-ref="sheet" role="dialog" aria-modal="true" aria-labelledby="vsx-sheet-title"></div></div>
       <div class="toast" data-ref="toast" role="status" aria-live="polite" hidden></div>
     </div>`;
   const ref = (n) => root.querySelector(`[data-ref="${n}"]`);
   const app = root.querySelector('.app');
   const launcher = root.querySelector('.launcher');
 
+  let reopenAfterCheck = false;
   function openApp() {
+    // Stepped aside for the site's check: open once it's done instead of locking the page underneath.
+    if (!host.isConnected) { reopenAfterCheck = true; return; }
     state.open = true; app.hidden = false; launcher.hidden = true;
+    // So Back from a product page lands in Deals again (the site's own history state is kept).
+    if (location.hash !== '#vsdeals') history.replaceState(history.state, '', location.pathname + location.search + '#vsdeals');
     document.documentElement.style.overflow = 'hidden';
     render();
     if (listIsOld()) loadDeals(); else if (stockIsDue()) loadStock();
     // Esc works straight away (focus starts on the page underneath).
     app.focus({ preventScroll: true });
   }
-  function stockIsDue() { return !!state.store && (!hasStock() || Date.now() - (state.stock.at || 0) > 6 * 3600e3); }
+  function stockIsDue() { return !!state.store && (!hasStock() || !!state.stock.partial || Date.now() - (state.stock.at || 0) > 6 * 3600e3); }
   // One rule everywhere: a list older than 10 minutes refreshes on open, on reconnect and on return.
   function listIsOld() { return !state.savedAt || Date.now() - state.savedAt > 10 * 60_000; }
   window.addEventListener('online', () => {
@@ -296,20 +331,25 @@ import {
   // on the same rule. Errors wait for Retry / reconnect so a failing site isn't hammered.
   setInterval(() => {
     if (!state.open || document.visibilityState !== 'visible' || state.loading || state.stockLoading) return;
-    if (!state.error && !state.blocked && listIsOld()) loadDeals();
-    else if (!state.stockError && stockIsDue()) loadStock();
-    else if (state.savedAt) {
-      // Only the time-based text: rebuilding the list would knock keyboard focus and scroll about.
+    const now = Date.now();
+    if (state.error) { if (!state.blocked && !state.siteChanged && now >= nextErrorRetry) return loadDeals(); }
+    else if (!state.blocked && listIsOld()) return loadDeals();
+    if (state.stockError) {
+      if (!state.stockBlocked && now >= nextStockRetry) return loadStock({ onlyMissing: hasStock() && now - state.stock.at < 6 * 3600e3 });
+    } else if (stockIsDue()) return loadStock({ onlyMissing: hasStock() && !!state.stock.partial });
+    // Only the time-based text: rebuilding the list would knock keyboard focus and scroll about.
+    if (state.savedAt) {
       const n = changeIds().size;
       ref('subtitle').textContent = `Updated ${relativeTime(state.savedAt)}` + (n ? ` · ${n} new or cheaper` : '');
     }
+    renderBanner();
   }, 60_000);
 
   function closeApp() {
     state.open = false; app.hidden = true; launcher.hidden = !get('launcher', true);
     document.documentElement.style.overflow = '';
     if (!launcher.hidden) launcher.focus({ preventScroll: true });
-    if (location.hash === '#vsdeals') history.replaceState(null, '', location.pathname + location.search);
+    if (location.hash === '#vsdeals') history.replaceState(history.state, '', location.pathname + location.search);
   }
 
   function toast(text) {
@@ -339,6 +379,17 @@ import {
   };
 
   function render() {
+    const a = root.activeElement;
+    const act = a && a.dataset ? a.dataset.act : null, v = a && a.dataset ? a.dataset.v : undefined;
+    renderNow();
+    // Rebuilt buttons drop keyboard focus: put it back on the same one (or the app) so Tab doesn't start over.
+    if (act && state.open && !(root.activeElement && root.activeElement.isConnected)) {
+      const same = v == null ? null : [...root.querySelectorAll(`[data-act="${act}"]`)].find((el) => el.dataset.v === v);
+      const t = same || root.querySelector(`[data-act="${act}"]`);
+      (t && t.offsetParent ? t : app).focus({ preventScroll: true });
+    }
+  }
+  function renderNow() {
     if (!state.open) return;
     renderFootNote();
     renderShareLine();
@@ -347,26 +398,7 @@ import {
       : state.savedAt ? `Updated ${relativeTime(state.savedAt)}` + (n ? ` · ${n} new or cheaper` : '') : 'Live from vitaminshoppe.com';
     root.querySelector('[data-act="refresh"]').classList.toggle('spin', state.loading || state.stockLoading);
 
-    const banner = ref('banner');
-    if (state.blocked && state.items.length) {
-      banner.innerHTML = `<div class="banner warn"><span><b>Quick check needed</b> to refresh · ${savedPhrase()}. Reload, complete Vitamin Shoppe's check, and Deals reopens.</span>
-        <button class="text-btn" data-act="reload-page">Reload page</button></div>`;
-    } else if (state.error && state.items.length) {
-      banner.innerHTML = `<div class="banner warn"><span><b>Couldn't refresh.</b> ${esc(state.error.replace(/\.$/, ''))} · ${savedPhrase()}.</span>` +
-        (state.siteChanged ? `<a class="text-btn" href="${esc(__VSX_HOME__)}vs-clearance.user.js" target="_blank" rel="noopener">Update</a>` : '') +
-        '<button class="text-btn" data-act="refresh">Retry</button></div>';
-    } else if (state.partialNote) {
-      banner.innerHTML = `<div class="banner warn"><span>${esc(state.partialNote)}</span><button class="text-btn" data-act="refresh">Retry</button></div>`;
-    } else if (state.stockError && state.mode === 'ship') {
-      banner.innerHTML = `<div class="banner info"><span>Shelf stock at ${esc(state.store?.name || 'your store')} ${state.stockBlocked ? 'needs a quick check' : "couldn't be checked"}.</span><button class="text-btn" data-act="${state.stockBlocked ? 'reload-page' : 'retry-stock'}">${state.stockBlocked ? 'Reload page' : 'Retry'}</button></div>`;
-    } else if (state.stockError && !(state.mode === 'pickup' && (!hasStock() || !visible().length))) {
-      // (In pickup with nothing to show, the full-page panel below says it instead.)
-      const age = hasStock() ? ` · showing stock checked ${relativeTime(state.stock.at)}` : '';
-      banner.innerHTML = `<div class="banner bad"><span>${esc(state.stockError.replace(/\.$/, ''))}${age}.</span><button class="text-btn" data-act="${state.stockBlocked ? 'reload-page' : 'retry-stock'}">${state.stockBlocked ? 'Reload page' : 'Retry'}</button></div>`;
-    } else if (hasStock() && !state.stockLoading && Date.now() - (state.stock.at || 0) > 6 * 3600e3) {
-      // 7. shelf stock's age said once, not on every card
-      banner.innerHTML = `<div class="banner info"><span>Shelf stock at ${esc(state.store.name)} was checked ${relativeTime(state.stock.at)}.</span><button class="text-btn" data-act="retry-stock">Check now</button></div>`;
-    } else banner.innerHTML = '';
+    renderBanner();
 
     const list = ref('list'); const status = ref('status');
     const have = state.items.length > 0;
@@ -408,6 +440,33 @@ import {
     if (!deals.length) { list.innerHTML = ''; status.hidden = false; status.innerHTML = noMatchesHtml(); return; }
     status.hidden = true;
     list.innerHTML = deals.map(cardHtml).join('');
+  }
+
+  let lastBannerHtml = null;
+  function renderBanner() {
+    let html = '';
+    if (state.blocked && state.items.length) {
+      html = `<div class="banner warn"><span><b>Quick check needed</b> to refresh · ${savedPhrase()}. Reload, complete Vitamin Shoppe's check, and Deals reopens.</span>
+        <button class="text-btn" data-act="reload-page">Reload page</button></div>`;
+    } else if (state.error && state.items.length) {
+      html = `<div class="banner warn"><span><b>Couldn't refresh.</b> ${esc(state.error.replace(/\.$/, ''))} · ${savedPhrase()}.</span>` +
+        (state.siteChanged ? `<a class="text-btn" href="${esc(__VSX_HOME__)}vs-clearance.user.js" target="_blank" rel="noopener">Update</a>` : '') +
+        '<button class="text-btn" data-act="refresh">Retry</button></div>';
+    } else if (state.partialNote) {
+      html = `<div class="banner warn"><span>${esc(state.partialNote)}</span><button class="text-btn" data-act="refresh">Retry</button></div>`;
+    } else if (state.stockError && state.mode === 'ship') {
+      html = `<div class="banner info"><span>Shelf stock at ${esc(state.store?.name || 'your store')} ${state.stockBlocked ? 'needs a quick check' : "couldn't be checked"}.</span><button class="text-btn" data-act="${state.stockBlocked ? 'reload-page' : 'retry-stock'}">${state.stockBlocked ? 'Reload page' : 'Retry'}</button></div>`;
+    } else if (state.stockError && !(state.mode === 'pickup' && (!hasStock() || !visible().length))) {
+      // (In pickup with nothing to show, the full-page panel below says it instead.)
+      const age = hasStock() ? ` · showing stock checked ${relativeTime(state.stock.at)}` : '';
+      html = `<div class="banner bad"><span>${esc(state.stockError.replace(/\.$/, ''))}${age}.</span><button class="text-btn" data-act="${state.stockBlocked ? 'reload-page' : 'retry-stock'}">${state.stockBlocked ? 'Reload page' : 'Retry'}</button></div>`;
+    } else if (hasStock() && !state.stockLoading && Date.now() - (state.stock.at || 0) > 6 * 3600e3) {
+      // 7. shelf stock's age said once, not on every card
+      html = `<div class="banner info"><span>Shelf stock at ${esc(state.store.name)} was checked ${relativeTime(state.stock.at)}.</span><button class="text-btn" data-act="retry-stock">Check now</button></div>`;
+    } else html = '';
+    if (html === lastBannerHtml) return;
+    lastBannerHtml = html;
+    ref('banner').innerHTML = html;
   }
 
   function renderControls() {
@@ -508,6 +567,8 @@ import {
   let promptText = '';
   function renderSheet() {
     const sheet = ref('sheet');
+    const oldInput = sheet.querySelector('form input');
+    const typed = oldInput ? oldInput.value : null, typing = oldInput && root.activeElement === oldInput;
     if (state.sheet === 'stores') {
       const rows = storeSearch.results.map((s) => {
         const why = s.closed ? 'Temporarily closed' : !s.pickup ? 'No in-store pickup' : null;
@@ -518,19 +579,21 @@ import {
             ${today ? `<small class="${why ? 'err' : ''}">${esc(today)}</small>` : ''}</span>
           <span class="dist">${s.dist >= 0 ? (s.dist < 10 ? s.dist.toFixed(1) : Math.round(s.dist)) + ' mi' : ''}</span></button>`;
       }).join('');
-      sheet.innerHTML = `<h2>Choose your store</h2><p class="muted">We'll check which clearance items are on the shelf there.</p>
+      sheet.innerHTML = `<h2 id="vsx-sheet-title">Choose your store</h2><p class="muted">We'll check which clearance items are on the shelf there.</p>
         <form data-ref="storeForm" class="store-form"><input type="search" inputmode="search" placeholder="ZIP code or City, ST" value="${esc(storeSearch.query)}" aria-label="ZIP code or city">
-          <button class="primary-btn" type="submit">${storeSearch.searching ? '…' : 'Search'}</button></form>
+          <button class="primary-btn" type="submit"${storeSearch.searching ? ' disabled aria-busy="true"' : ''}>${storeSearch.searching ? 'Searching…' : 'Search'}</button></form>
         ${storeSearch.message ? `<p class="err">${esc(storeSearch.message)}${storeSearch.blocked ? ' Reload the page, complete any check, then search again.' : ''}</p>${storeSearch.blocked ? '<button class="outline-btn" data-act="reload-page">Reload page</button>' : ''}` : ''}
         <div class="stores">${rows}</div>
         ${state.store ? '<button class="outline-btn" data-act="clear-store">Clear store · ship to home only</button>' : ''}
         <button class="text-btn close" data-act="close-sheet">Close</button>`;
+      const input = sheet.querySelector('form input');
+      if (input && typed != null) { input.value = typed; if (typing) input.focus({ preventScroll: true }); }
     } else if (state.sheet === 'prompt') {
       const deals = visible(); const shown = Math.min(deals.length, AI_MAX_ITEMS);
       promptText = aiPrompt(deals, deals.length, state.store, state.mode);
       const scope = [state.mode === 'pickup' && state.store ? `On the shelf at ${state.store.name}` : 'Ship to home',
         state.floor && `${state.floor}%+ off`, state.category, state.query && `“${state.query.trim()}”`].filter(Boolean).join(' · ');
-      sheet.innerHTML = `<h2>Ask an AI which deals are worth it</h2>
+      sheet.innerHTML = `<h2 id="vsx-sheet-title">Ask an AI which deals are worth it</h2>
         <p class="muted">Paste into ChatGPT, Claude, Gemini or similar for an evidence score, absorption rating, value per dose and a BUY / CONSIDER / PASS verdict.</p>
         <div class="scope"><b>${deals.length > shown ? `Top ${shown} of ${deals.length} deals` : `${shown} deals`}</b>${esc(scope)}</div>
         <div class="sheet-actions"><button class="primary-btn" data-act="copy-prompt">Copy prompt</button>${navigator.share ? '<button class="tonal-btn wide" data-act="share-prompt">Share</button>' : ''}</div>
@@ -541,17 +604,7 @@ import {
 
   // ------------------------------------------------------------------- events
 
-  function update(fn) {
-    const a = root.activeElement;
-    const act = a && a.dataset ? a.dataset.act : null, v = a && a.dataset ? a.dataset.v : undefined;
-    fn(); prefs(); render();
-    // render() replaces the buttons; put focus back on the same one so Tab doesn't start over.
-    if (act && !(root.activeElement && root.activeElement.isConnected)) {
-      const same = v == null ? null : [...root.querySelectorAll(`[data-act="${act}"]`)].find((el) => el.dataset.v === v);
-      const t = same || root.querySelector(`[data-act="${act}"]`);
-      if (t && t.offsetParent) t.focus({ preventScroll: true });
-    }
-  }
+  function update(fn) { fn(); prefs(); render(); }
 
   root.addEventListener('click', async (e) => {
     const el = e.target.closest('[data-act]');
@@ -599,7 +652,7 @@ import {
         if (row) row.focus({ preventScroll: true });
         await loadStock();
         // 5. say "none" plainly rather than "0 items"
-        if (hasStock()) {
+        if (hasStock() && !state.stockError) {
           const onShelf = state.items.filter((d) => d.qty > 0).length;
           toast(onShelf ? `${onShelf} clearance item${onShelf === 1 ? '' : 's'} on the shelf at ${s.name}` : `None of the clearance items are on the shelf at ${s.name}`);
         }
@@ -699,33 +752,48 @@ import {
     return !!document.querySelector('iframe[src*="captcha-delivery.com"]') || !!(dd && dd.host);
   }
 
+  /**
+   * The site's check can appear at any time (at load, or over the page after a refused request).
+   * Step aside while it's up — never touching it — and come back, reopened if Deals was open, once
+   * the user has finished it. Checked at most every 300 ms (the store's page mutates constantly),
+   * plus a slow poll for checks that change only page variables.
+   */
+  function checkWatch() {
+    const check = onCheckPage();
+    if (check && host.isConnected) {
+      reopenAfterCheck = reopenAfterCheck || state.open;
+      state.open = false; // stops the reconnect / tab-return refreshes too
+      host.remove();
+      document.documentElement.style.overflow = '';
+    } else if (!check && !host.isConnected) {
+      document.body.appendChild(host);
+      if (reopenAfterCheck) { reopenAfterCheck = false; openApp(); }
+    }
+  }
   function mount() {
     if (!document.body) return setTimeout(mount, 50);
-    // Leave the check alone (and keep #vsdeals, so Deals opens when the page reloads after it).
-    if (onCheckPage()) return;
-    document.body.appendChild(host);
-    // The automatic check can add its frame after load, however slow the phone: watch the page for
-    // it and step aside when it appears. (Our own nodes live in a shadow root, so they don't trigger this.)
-    // Checked at most every 300 ms: the store's own page mutates constantly.
     let queued = false;
-    const watch = new MutationObserver(() => {
+    new MutationObserver(() => {
       if (queued) return;
       queued = true;
-      setTimeout(() => {
-        queued = false;
-        if (!onCheckPage()) return;
-        watch.disconnect();
-        state.open = false; // stops the reconnect / tab-return refreshes too
-        host.remove();
-        document.documentElement.style.overflow = '';
-      }, 300);
-    });
-    watch.observe(document.documentElement, { childList: true, subtree: true });
+      setTimeout(() => { queued = false; checkWatch(); }, 300);
+    }).observe(document.documentElement, { childList: true, subtree: true });
+    setInterval(checkWatch, 2000);
     const paired = takePairing();
     // Coming in through #vsdeals brings a hidden Deals button back.
     if (location.hash === '#vsdeals') put('launcher', true);
     launcher.hidden = !get('launcher', true);
+    // Leave a check alone; Deals mounts (and opens, if asked) once it's done.
+    if (onCheckPage()) { reopenAfterCheck = !!paired || location.hash === '#vsdeals'; return; }
+    document.body.appendChild(host);
+    // Back from a product page: the same search and scroll position as before.
+    let view = null;
+    try { view = JSON.parse(sessionStorage.getItem('vsx.view') || 'null'); sessionStorage.removeItem('vsx.view'); } catch { /* private mode */ }
+    if (view && Date.now() - view.at < 30 * 60_000 && location.hash === '#vsdeals') {
+      state.query = view.q || ''; ref('q').value = state.query;
+    }
     if (paired || location.hash === '#vsdeals') openApp();
+    if (view && state.open && view.top) requestAnimationFrame(() => { ref('scroll').scrollTop = view.top; });
     let reopen = null;
     try { reopen = sessionStorage.getItem('vsx.reopen'); sessionStorage.removeItem('vsx.reopen'); } catch { /* private mode */ }
     if (reopen === 'stores' && state.open) openSheet('stores');
@@ -733,4 +801,8 @@ import {
   }
   mount();
   window.addEventListener('hashchange', () => { if (location.hash === '#vsdeals' && !state.open) openApp(); });
+  window.addEventListener('pagehide', () => {
+    if (!state.open) return;
+    try { sessionStorage.setItem('vsx.view', JSON.stringify({ q: state.query, top: ref('scroll').scrollTop, at: Date.now() })); } catch { /* private mode */ }
+  });
 })();

@@ -157,6 +157,9 @@ class WebPublisher(
         _state.update { it.copy(enabled = enabled, lastError = null, lastNote = null) }
     }
 
+    /** What went out last (this run only), so a second identical request is a no-op. */
+    private var lastPublishedSignature: Int? = null
+
     private class Outcome(val error: String?, val retryLater: Boolean = false, val note: String? = null)
 
     /** Returns null on success, or a user-facing reason (an unreachable target is marked pending). */
@@ -169,6 +172,8 @@ class WebPublisher(
     ): String? = lock.withLock {
         val s = _state.value
         if (!s.isConfigured) return@withLock "Sharing isn't set up yet."
+        val signature = listOf(s.gitHubRepo, s.serverUrl, savedAt, store?.storeId, stockStoreId, stock.hashCode(), items.size).hashCode()
+        if (signature == lastPublishedSignature && !s.pending && s.lastError == null) return@withLock null
         _state.update { it.copy(isPublishing = true) }
         val outcome = withContext(Dispatchers.IO) {
             val repo = gitHubRepo(s.gitHubRepo)
@@ -197,6 +202,7 @@ class WebPublisher(
         }
         val now = System.currentTimeMillis()
         val ok = outcome.error == null
+        lastPublishedSignature = if (ok && !outcome.retryLater) signature else null
         prefs.edit().putBoolean(K_PENDING, outcome.retryLater)
             .putString(K_ERROR, if (outcome.retryLater) null else outcome.error)
             .putString(K_NOTE, outcome.note)

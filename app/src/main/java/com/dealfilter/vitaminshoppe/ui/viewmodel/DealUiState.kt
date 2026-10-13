@@ -36,6 +36,10 @@ data class DealUiState(
     val isShowingSavedData: Boolean = false,
     val isStockLoading: Boolean = false,
     val stockError: String? = null,
+    /** Why the shelf check failed, as a short cause ("You're offline."), for the full-screen state. */
+    val stockErrorCause: String? = null,
+    /** The shelf check is waiting on Vitamin Shoppe's human check. */
+    val stockNeedsVerification: Boolean = false,
     val storeSheet: StoreSheetState? = null,
     /** What changed at the last refresh that actually changed something. */
     val changes: com.dealfilter.vitaminshoppe.domain.ListChanges = com.dealfilter.vitaminshoppe.domain.ListChanges(emptySet(), emptyMap()),

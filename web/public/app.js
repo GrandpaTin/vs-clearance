@@ -59,7 +59,7 @@ async function load({ manual = false } = {}) {
     let timer = setTimeout(function stalled() {
       if (hadList || state.snapshot) return abort.abort();
       state.loading = false;
-      state.error = navigator.onLine === false ? 'offline' : 'failed';
+      state.error = navigator.onLine === false ? 'offline' : 'stalled';
       render();
       timer = setTimeout(() => abort.abort(), 45000);
     }, 15000);
@@ -102,7 +102,7 @@ async function load({ manual = false } = {}) {
       : hadList ? 'Updated' : 'Deals loaded');
   } catch (e) {
     const failure = navigator.onLine === false ? 'offline' : 'failed';
-    if (!manual && state.snapshot && failure === 'failed' && ++quietFailures < 2) {
+    if (!manual && !wasLoading && state.snapshot && failure === 'failed' && ++quietFailures < 2) {
       changed = false;
       return; // flaky mobile data: wait for the next check before warning
     }
@@ -261,7 +261,9 @@ function renderBody() {
     list.innerHTML = '';
     cardCache = new Map();
     status.hidden = false;
-    status.innerHTML = state.error === 'empty'
+    status.innerHTML = state.error === 'stalled'
+      ? statusHtml('⏳', 'Still loading deals…', 'Your connection is slow; the deals will appear here as soon as they arrive.', [['Try again', 'retry', false]])
+      : state.error === 'empty'
       ? statusHtml('🏷️', 'No deals shared yet', 'The person who sent this link hasn’t shared a list yet. You can still get VS Clearance for your own phone or computer — it’s free.', [['Get the app', 'get', true]])
       : statusHtml('⚠️', 'Couldn’t load deals', state.error === 'offline' || navigator.onLine === false
         ? 'You seem to be offline. Check your connection and try again.'

@@ -148,8 +148,6 @@ pre { white-space: pre-wrap; background: var(--surface-2); border-radius: 12px; 
 .share-line span { flex: 1; }
 .share-line a { color: var(--link); text-decoration: none; }
 
-.foot-note { text-align: center; color: var(--muted); font-size: .8rem; padding: 4px 16px 24px; }
-.foot-note .fn { display: inline-block; }
-.foot-note .fn + .fn::before { content: "·"; padding: 0 .4em; }
+.foot-note { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; column-gap: 14px; color: var(--muted); font-size: .8rem; padding: 4px 16px 24px; }
 .link-btn { background: none; border: 0; color: inherit; text-decoration: underline; font: inherit; padding: 8px 4px; min-height: 40px; cursor: pointer; }
 .app:focus { outline: none; }

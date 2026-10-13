@@ -370,6 +370,14 @@ fun DealScreenContent(state: DealUiState, viewModel: DealActions, modifier: Modi
                         item(key = "skeletonChips") { SkeletonChips() }
                         items(4, key = { "skeleton$it" }) { SkeletonCard() }
                     }
+                    !state.hasData && state.loadError != null && state.needsVerification -> item(key = "error") {
+                        StatusMessage(
+                            icon = Icons.Default.VerifiedUser,
+                            title = "Quick check needed",
+                            body = "Vitamin Shoppe wants to confirm a person is browsing before it shows prices. Tap Check now to see its check.",
+                            primary = "Check now" to viewModel::refresh
+                        )
+                    }
                     !state.hasData && state.loadError != null -> item(key = "error") {
                         StatusMessage(
                             icon = if (state.loadErrorIsOffline) Icons.Default.CloudOff else Icons.Default.ErrorOutline,
@@ -399,9 +407,9 @@ fun DealScreenContent(state: DealUiState, viewModel: DealActions, modifier: Modi
                             icon = Icons.Default.ErrorOutline,
                             warning = true,
                             title = "Couldn't check shelves at ${state.selectedStore?.name ?: "your store"}",
-                            body = (if (state.stockError.startsWith("Complete")) state.stockError else state.stockError.substringAfter(". ", "").ifBlank { "Shelf stock didn't load." }) +
-                                " You can try again, or browse ship-to-home deals meanwhile.",
-                            primary = (if (state.stockError.startsWith("Complete")) "Check now" else "Try again") to viewModel::retryStock,
+                            body = if (state.stockNeedsVerification) "Vitamin Shoppe wants a quick check first. Tap Check now, or browse ship-to-home deals meanwhile."
+                            else (state.stockErrorCause ?: "Shelf stock didn't load.") + " Try again, or browse ship-to-home deals meanwhile.",
+                            primary = (if (state.stockNeedsVerification) "Check now" else "Try again") to viewModel::retryStock,
                             secondary = "Show ship-to-home" to { viewModel.onModeChange(FulfillmentMode.SHIP) }
                         )
                     }
@@ -684,7 +692,7 @@ private fun Banners(state: DealUiState, viewModel: DealActions, now: Long) {
         }
         // In pickup mode with nothing listed, the full-screen state explains this instead.
         val stockError = state.stockError
-        if (stockError != null && !(state.mode == FulfillmentMode.PICKUP && state.visibleDeals.isEmpty())) {
+        if (stockError != null && state.mode == FulfillmentMode.PICKUP && state.visibleDeals.isNotEmpty()) {
             Banner(
                 icon = Icons.Default.Storefront,
                 text = stockError,

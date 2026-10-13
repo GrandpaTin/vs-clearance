@@ -6,7 +6,10 @@ const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'core.js', 'boot-chec
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: 'reload' })))
     // Best effort: a missing or failed list mustn't stop the worker installing.
-    .then(() => fetch('api/snapshot', { cache: 'no-cache' }).then((r) => (r.ok ? c.put('api/snapshot', r) : null)).catch(() => null)))
+    .then(() => Promise.race([
+      fetch('api/snapshot', { cache: 'no-cache' }).then((r) => (r.ok ? c.put('api/snapshot', r) : null)).catch(() => null),
+      new Promise((resolve) => setTimeout(resolve, 8000)) // a hung download mustn't hold up the offline shell
+    ])))
     .then(() => self.skipWaiting()));
 });
 
@@ -32,14 +35,17 @@ self.addEventListener('fetch', (e) => {
       headers.set('X-From-Cache', '1');
       return r.blob().then((b) => new Response(b, { status: 200, headers }));
     });
-    const network = fetch(e.request).then((res) => {
+    // Abandoned 30 s after the saved copy answered, so polls on a dead connection don't pile up.
+    const ctrl = new AbortController();
+    const network = fetch(new Request(e.request, { signal: ctrl.signal })).then((res) => {
       if (res.ok) { const copy = res.clone(); caches.open(VERSION).then((c) => c.put('api/snapshot', copy)); }
       return res;
     });
     network.catch(() => {}); // if the saved copy wins, a later network failure is no one's business
     // A request that hangs (weak in-store signal) never fails, so after 8 s answer from the saved
     // copy instead; with nothing saved, keep waiting for the network.
-    const slow = new Promise((resolve) => setTimeout(resolve, 8000)).then(fromCache);
+    const slow = new Promise((resolve) => setTimeout(resolve, 8000)).then(fromCache)
+      .then((r) => { if (r) setTimeout(() => ctrl.abort(), 30000); return r; });
     e.respondWith(Promise.race([network, slow.then((r) => r || network)])
       .catch(() => fromCache().then((r) => r || Response.error())));
     return;

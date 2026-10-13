@@ -20,6 +20,7 @@ import com.dealfilter.vitaminshoppe.data.model.FulfillmentMode
 import com.dealfilter.vitaminshoppe.data.model.SortOption
 import com.dealfilter.vitaminshoppe.data.model.StoreLocation
 import com.dealfilter.vitaminshoppe.data.remote.FetchException
+import com.dealfilter.vitaminshoppe.data.remote.QuietChallenge
 import com.dealfilter.vitaminshoppe.data.remote.VsApi
 import com.dealfilter.vitaminshoppe.data.remote.WebPublisher
 import com.dealfilter.vitaminshoppe.data.remote.WebSession
@@ -194,12 +195,16 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
         if (share.pending && share.enabled && loadJob?.isActive != true) publishCurrent(announce = false)
     }
 
-    /** Shelf stock that failed to load (no signal, site hiccup) is tried again; a pending human check waits for the user. */
+    /**
+     * Shelf stock that failed to load (no signal, site hiccup), or never arrived for this store (the app
+     * was closed mid-check), is tried again; a pending human check waits for the user.
+     */
     private fun retryStockIfFailed() {
         val s = _uiState.value
         val store = s.selectedStore ?: return
-        if (s.stockError == null || stockJob?.isActive == true || afterVerification.containsKey("stock") || s.isVerificationVisible) return
-        startStockLoad(store)
+        val neverLoaded = lastStock?.first != store.storeId && s.allDeals.isNotEmpty()
+        if ((s.stockError == null && !neverLoaded) || stockJob?.isActive == true || afterVerification.containsKey("stock") || s.isVerificationVisible) return
+        startStockLoad(store, quiet = true)
     }
 
     private fun scheduleAutoRetry() {
@@ -265,7 +270,7 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
                 )
             }
             try {
-                val fetched = repository.fetchClearance()
+                val fetched = if (auto) withContext(QuietChallenge()) { repository.fetchClearance() } else repository.fetchClearance()
                 val now = System.currentTimeMillis()
                 // Show the last known shelf stock right away (new SKUs stay "unknown") so pickup
                 // mode doesn't empty out while the fresh stock check runs.
@@ -293,7 +298,7 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
                 val store = _uiState.value.selectedStore
                 // With a store, the stock check that follows publishes (once, with fresh stock).
                 persistCache(items, now, carried?.first, carried?.second ?: emptyMap(), publish = store == null)
-                if (store != null) startStockLoad(store) else stockJob?.cancel()
+                if (store != null) startStockLoad(store, quiet = auto) else stockJob?.cancel()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: FetchException.VerificationRequired) {
@@ -314,7 +319,7 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
     }
 
     /** All stock loads go through here so a newer store always cancels the older load. */
-    private fun startStockLoad(store: StoreLocation, announce: Boolean = false) {
+    private fun startStockLoad(store: StoreLocation, announce: Boolean = false, quiet: Boolean = false) {
         stockJob?.cancel()
         val items = _uiState.value.allDeals
         if (items.isEmpty()) {
@@ -324,7 +329,8 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
         _uiState.update { it.copy(isStockLoading = true, stockError = null) }
         val job = viewModelScope.launch {
             try {
-                val stock = repository.fetchStoreStock(store.storeId, items)
+                val stock = if (quiet) withContext(QuietChallenge()) { repository.fetchStoreStock(store.storeId, items) }
+                else repository.fetchStoreStock(store.storeId, items)
                 _uiState.update { state ->
                     if (state.selectedStore?.storeId != store.storeId) return@update state
                     val updated = applyStock(state.allDeals, stock)
@@ -344,11 +350,20 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
                 throw e
             } catch (e: FetchException.VerificationRequired) {
                 afterVerification["stock"] = { _uiState.value.selectedStore?.let { startStockLoad(it) } }
-                _uiState.update { it.copy(stockError = "Complete the verification to check shelf stock at ${store.name}.") }
+                _uiState.update {
+                    it.copy(stockError = "Complete the verification to check shelf stock at ${store.name}.", stockNeedsVerification = true, stockErrorCause = null)
+                }
                 shareIfOn()
             } catch (e: Exception) {
                 val detail = e.message?.let { " $it" } ?: ""
-                _uiState.update { it.copy(stockError = "Couldn't check stock at ${store.name}.$detail") }
+                val cause = when (e) {
+                    is FetchException.Offline -> "You're offline."
+                    is FetchException.Timeout -> "Vitamin Shoppe took too long to answer."
+                    is FetchException.Network -> "Couldn't reach vitaminshoppe.com."
+                    is FetchException -> e.message
+                    else -> null
+                }
+                _uiState.update { it.copy(stockError = "Couldn't check stock at ${store.name}.$detail", stockErrorCause = cause, stockNeedsVerification = false) }
                 if (inForeground && stockFailures < STOCK_RETRY_DELAYS_MS.size) {
                     val wait = STOCK_RETRY_DELAYS_MS[stockFailures++]
                     stockRetryJob?.cancel()
@@ -608,6 +623,7 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
     }
 
     override fun clearStore() {
+        val checkWasRunning = stockJob?.isActive == true
         stockJob?.cancel()
         stockRetryJob?.cancel()
         stockFailures = 0
@@ -624,6 +640,7 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
             ).withDerived()
         }
         savePreferences()
+        if (checkWasRunning) shareIfOn()
     }
 
     // -------------------------------------------------------------------------------------------

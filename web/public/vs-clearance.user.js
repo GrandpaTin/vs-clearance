@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         VS Clearance — Vitamin Shoppe deal finder
 // @namespace    vs-clearance
-// @version      3.1.1.47
+// @version      3.1.1.48
 // @description  Every Vitamin Shoppe clearance deal with real cart prices, your store's shelf stock, filters, and an AI review prompt.
 // @match        https://www.vitaminshoppe.com/*
 // @run-at       document-idle
@@ -15,8 +15,8 @@
 
 (() => {
 'use strict';
-const __VSX_CSS__ = ":host {\n  --navy: #012169; --navy-dark: #001540; --sky: #15BEF0;\n  --bg: #F8FAFC; --surface: #FFFFFF; --surface-2: #F1F5F9; --text: #0F172A; --muted: #64748B;\n  --outline: #CBD5E1; --hairline: #E2E8F0; --price: #047857; --em-bg: #D1FAE5; --em-fg: #065F46;\n  --sky-bg: #E0F2FE; --sky-fg: #0369A1; --amber-bg: #FEF3C7; --amber-fg: #92400E; --red-bg: #FEE2E2; --red-fg: #991B1B;\n  --header: var(--navy); --search: var(--navy-dark); --link: var(--navy);\n}\n@media (prefers-color-scheme: dark) {\n  :host {\n    --bg: #0B1120; --surface: #111827; --surface-2: #1E293B; --text: #F8FAFC; --muted: #94A3B8;\n    --outline: #334155; --hairline: #1F2A3C; --price: #34D399; --em-bg: #064E3B; --em-fg: #A7F3D0;\n    --sky-bg: #0C4A6E; --sky-fg: #BAE6FD; --amber-bg: #451A03; --amber-fg: #FCD34D; --red-bg: #7F1D1D; --red-fg: #FECACA;\n    --header: var(--navy-dark); --search: #1E293B; --link: var(--sky);\n  }\n}\n* { box-sizing: border-box; }\n[hidden] { display: none !important; }\nbutton { font: inherit; color: inherit; cursor: pointer; }\n:focus-visible { outline: 3px solid var(--sky); outline-offset: 2px; }\n.vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }\n.muted { color: var(--muted); margin: 0; }\n.err { color: var(--red-fg); margin: 0; }\n\n.launcher {\n  position: fixed; left: 16px; bottom: calc(16px + env(safe-area-inset-bottom)); z-index: 2147483646;\n  display: flex; align-items: center; gap: 6px; border: 0; border-radius: 999px; padding: 0 20px; min-height: 52px;\n  background: linear-gradient(135deg, #34D399, #047857); color: #fff; font: 700 17px/1 system-ui, -apple-system, sans-serif;\n  box-shadow: 0 8px 24px rgba(0,0,0,.3);\n}\n\n.app {\n  position: fixed; inset: 0; z-index: 2147483647; display: flex; flex-direction: column;\n  background: var(--bg); color: var(--text); font: 16px/1.4 system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif;\n  -webkit-text-size-adjust: 100%;\n}\n.top { background: var(--header); color: #fff; padding: calc(env(safe-area-inset-top) + 10px) 16px 12px; flex: none; }\n.top-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; max-width: 900px; margin: 0 auto; }\n.top-actions { display: flex; }\nh1 { font-size: 1.35rem; margin: 0; }\n.subtitle { margin: 2px 0 0; font-size: .85rem; opacity: .85; }\n.icon-btn { background: transparent; border: 0; border-radius: 50%; width: 44px; height: 44px; display: grid; place-items: center; font-size: 20px; }\n.icon-btn.on-dark { color: #fff; }\n.icon-btn.spin { animation: spin 1s linear infinite; }\n@keyframes spin { to { transform: rotate(360deg); } }\n.search { display: flex; align-items: center; gap: 8px; background: var(--search); border-radius: 12px; padding: 0 12px; margin: 10px auto 0; max-width: 900px; min-height: 50px; }\n.search input { flex: 1; min-width: 0; background: transparent; border: 0; color: #fff; font-size: 16px; padding: 12px 0; }\n.search input::placeholder { color: rgba(255,255,255,.7); }\n.search input:focus { outline: none; }\n\n.scroll { flex: 1; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding-bottom: calc(32px + env(safe-area-inset-bottom)); }\n.scroll > * { max-width: 900px; margin-left: auto; margin-right: auto; }\n.banner { display: flex; align-items: center; gap: 10px; margin: 12px; border-radius: 12px; padding: 8px 8px 8px 14px; }\n.banner span { flex: 1; }\n.banner.warn { background: var(--amber-bg); color: var(--amber-fg); }\n.banner.bad { background: var(--red-bg); color: var(--red-fg); }\n.banner.info { background: var(--sky-bg); color: var(--sky-fg); }\n.text-btn { background: none; border: 0; font-weight: 700; padding: 10px 12px; min-height: 44px; border-radius: 8px; }\n\n.controls { padding: 12px 12px 4px; }\n.segmented { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--outline); border-radius: 999px; overflow: hidden; }\n.segmented button { background: transparent; border: 0; min-height: 44px; font-weight: 600; }\n.segmented button + button { border-left: 1px solid var(--outline); }\n.segmented button[aria-checked=\"true\"] { background: var(--sky-bg); color: var(--sky-fg); }\n.segmented button[aria-checked=\"true\"]::before { content: \"✓ \"; }\n.store-row { display: flex; align-items: center; gap: 10px; width: 100%; margin-top: 8px; padding: 8px 12px; min-height: 52px;\n  background: var(--surface-2); border: 0; border-radius: 12px; text-align: left; }\n.store-text { flex: 1; display: flex; flex-direction: column; }\n.store-text small { color: var(--muted); }\n.chips { display: flex; gap: 8px; overflow-x: auto; padding: 8px 2px 0; scrollbar-width: none; }\n.chips::-webkit-scrollbar { display: none; }\n.chip { flex: none; border: 1px solid var(--outline); background: transparent; border-radius: 8px; min-height: 36px; padding: 6px 14px; font-weight: 600; color: var(--muted); white-space: nowrap; }\n.chip[aria-pressed=\"true\"] { background: var(--sky-bg); color: var(--sky-fg); border-color: transparent; }\n.chip[aria-pressed=\"true\"]::before { content: \"✓ \"; }\n.chip.clear::after { content: \" ✕\"; }\n\n.summary { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 8px; background: var(--bg); padding: 10px 12px 8px 16px; border-bottom: 1px solid var(--hairline); }\n.count { flex: 1 0 auto; font-weight: 700; white-space: nowrap; }\n.tonal-btn { display: inline-flex; align-items: center; gap: 6px; background: var(--sky-bg); color: var(--sky-fg); border: 0; border-radius: 999px; min-height: 40px; padding: 0 12px; font-weight: 700; white-space: nowrap; }\n.tonal-btn.wide { justify-content: center; }\n.sort select { background: transparent; color: var(--link); border: 0; font: inherit; font-weight: 700; min-height: 40px; max-width: 36vw; text-overflow: ellipsis; }\n\n.list { list-style: none; margin: 0 auto; padding: 8px 12px; display: grid; gap: 8px; }\n@media (min-width: 760px) { .list { grid-template-columns: 1fr 1fr; } }\n.card { background: var(--surface); border: 1px solid var(--hairline); border-radius: 16px; display: grid; grid-template-columns: 88px 1fr; gap: 12px; padding: 12px 6px 6px 12px; }\n.thumb { width: 88px; height: 88px; border-radius: 12px; border: 1px solid var(--hairline); background: #fff; display: grid; place-items: center; overflow: hidden; text-decoration: none; font-size: 32px; }\n.thumb.none { background: var(--surface-2); }\n.thumb img { width: 82px; height: 82px; object-fit: contain; padding: 4px; }\n.body { min-width: 0; display: flex; flex-direction: column; gap: 4px; }\n.brandline { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }\n.brand { font-size: .75rem; letter-spacing: .06em; font-weight: 800; color: var(--link); text-transform: uppercase; }\n.title { font-weight: 600; color: var(--text); text-decoration: none; padding-right: 8px;\n  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }\n.prices { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }\n.price { font-size: 1.35rem; font-weight: 800; color: var(--price); }\n.was { color: var(--muted); text-decoration: line-through; }\n.tag { font-size: .75rem; font-weight: 800; border-radius: 6px; padding: 2px 6px; }\n.tag.off, .tag.drop { background: var(--em-bg); color: var(--em-fg); }\n.tag.new { background: var(--sky-bg); color: var(--sky-fg); }\n.note { font-size: .85rem; color: var(--muted); }\n.pills { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }\n.pill { background: var(--surface-2); color: var(--muted); font-size: .8rem; border-radius: 6px; padding: 2px 6px; }\n.rating { font-size: .85rem; color: var(--muted); }\n.foot { display: flex; align-items: center; min-height: 44px; }\n.stock { flex: 1; display: flex; align-items: center; gap: 6px; font-size: .9rem; font-weight: 500; }\n.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--outline); flex: none; }\n.dot.good { background: var(--em-fg); }\n.dot.bad { background: var(--red-fg); }\n.foot .icon-btn { color: var(--muted); }\n\n.status { text-align: center; padding: 40px 28px; display: grid; justify-items: center; gap: 8px; }\n.badge { width: 88px; height: 88px; border-radius: 50%; display: grid; place-items: center; background: var(--sky-bg); font-size: 40px; }\n.status h2 { margin: 8px 0 0; font-size: 1.15rem; }\n.status p { margin: 0; color: var(--muted); max-width: 460px; }\n.actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 8px; }\n.primary-btn { background: var(--navy); color: #fff; border: 0; border-radius: 999px; min-height: 44px; padding: 0 20px; font-weight: 700; }\n@media (prefers-color-scheme: dark) { .primary-btn { background: var(--sky); color: var(--navy-dark); } }\na.primary-btn { display: inline-flex; align-items: center; text-decoration: none; }\n.outline-btn { background: transparent; border: 1px solid var(--outline); border-radius: 999px; min-height: 44px; padding: 0 18px; font-weight: 700; }\n.skeleton { height: 140px; border-radius: 16px; background: linear-gradient(90deg, var(--surface-2), var(--surface), var(--surface-2)); background-size: 200% 100%; animation: shimmer 1.4s infinite; }\n@keyframes shimmer { to { background-position: -200% 0; } }\n@media (prefers-reduced-motion: reduce) { .skeleton, .icon-btn.spin { animation: none; } }\n\n.sheet-wrap { position: absolute; inset: 0; background: rgba(0,0,0,.5); display: flex; align-items: flex-end; justify-content: center; z-index: 5; }\n.sheet { background: var(--surface); color: var(--text); width: 100%; max-width: 720px; max-height: 88%; overflow-y: auto; overscroll-behavior: contain;\n  border-radius: 20px 20px 0 0; padding: 20px 16px calc(16px + env(safe-area-inset-bottom)); display: grid; gap: 12px; }\n@media (min-width: 760px) { .sheet-wrap { align-items: center; } .sheet { border-radius: 20px; } }\n.sheet h2 { margin: 0; font-size: 1.25rem; }\n.store-form { display: flex; gap: 8px; }\n.store-form input { flex: 1; min-width: 0; font-size: 16px; padding: 12px; border: 1px solid var(--outline); border-radius: 12px; background: var(--surface); color: var(--text); }\n.stores { display: grid; gap: 8px; }\n.store { display: flex; gap: 8px; text-align: left; background: var(--surface-2); border: 2px solid transparent; border-radius: 12px; padding: 12px; }\n.store.selected { background: var(--sky-bg); border-color: var(--sky-fg); }\n.store[aria-disabled=\"true\"] { opacity: .7; }\n.store-main { flex: 1; display: flex; flex-direction: column; }\n.store-main span, .store-main small { color: var(--muted); }\n.store-main small.err { color: var(--red-fg); }\n.dist { color: var(--link); font-weight: 700; white-space: nowrap; }\n.scope { background: var(--sky-bg); color: var(--sky-fg); border-radius: 12px; padding: 12px; }\n.scope b { display: block; }\n.sheet-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }\n.sheet-actions button { min-height: 48px; }\ndetails summary { cursor: pointer; font-weight: 700; min-height: 44px; display: flex; align-items: center; }\npre { white-space: pre-wrap; background: var(--surface-2); border-radius: 12px; padding: 12px; max-height: 300px; overflow: auto; font-size: 12px; margin: 0; }\n.close { justify-self: end; }\n.toast { position: absolute; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom)); transform: translateX(-50%); background: #1E293B; color: #fff; padding: 12px 18px; border-radius: 12px; max-width: calc(100% - 32px); z-index: 6; }\n\n.share-line { display: flex; align-items: center; gap: 4px; margin: 0 12px 12px; padding: 4px 4px 4px 14px; border-radius: 12px; background: var(--surface-2); color: var(--muted); font-size: .9rem; }\n.share-line span { flex: 1; }\n.share-line a { color: var(--link); text-decoration: none; }\n\n.foot-note { text-align: center; color: var(--muted); font-size: .8rem; padding: 4px 16px 24px; }\n.foot-note .fn { display: inline-block; }\n.foot-note .fn + .fn::before { content: \"·\"; padding: 0 .4em; }\n.link-btn { background: none; border: 0; color: inherit; text-decoration: underline; font: inherit; padding: 8px 4px; min-height: 40px; cursor: pointer; }\n.app:focus { outline: none; }\n";
-const __VSX_VERSION__ = "3.1.1.47";
+const __VSX_CSS__ = ":host {\n  --navy: #012169; --navy-dark: #001540; --sky: #15BEF0;\n  --bg: #F8FAFC; --surface: #FFFFFF; --surface-2: #F1F5F9; --text: #0F172A; --muted: #64748B;\n  --outline: #CBD5E1; --hairline: #E2E8F0; --price: #047857; --em-bg: #D1FAE5; --em-fg: #065F46;\n  --sky-bg: #E0F2FE; --sky-fg: #0369A1; --amber-bg: #FEF3C7; --amber-fg: #92400E; --red-bg: #FEE2E2; --red-fg: #991B1B;\n  --header: var(--navy); --search: var(--navy-dark); --link: var(--navy);\n}\n@media (prefers-color-scheme: dark) {\n  :host {\n    --bg: #0B1120; --surface: #111827; --surface-2: #1E293B; --text: #F8FAFC; --muted: #94A3B8;\n    --outline: #334155; --hairline: #1F2A3C; --price: #34D399; --em-bg: #064E3B; --em-fg: #A7F3D0;\n    --sky-bg: #0C4A6E; --sky-fg: #BAE6FD; --amber-bg: #451A03; --amber-fg: #FCD34D; --red-bg: #7F1D1D; --red-fg: #FECACA;\n    --header: var(--navy-dark); --search: #1E293B; --link: var(--sky);\n  }\n}\n* { box-sizing: border-box; }\n[hidden] { display: none !important; }\nbutton { font: inherit; color: inherit; cursor: pointer; }\n:focus-visible { outline: 3px solid var(--sky); outline-offset: 2px; }\n.vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }\n.muted { color: var(--muted); margin: 0; }\n.err { color: var(--red-fg); margin: 0; }\n\n.launcher {\n  position: fixed; left: 16px; bottom: calc(16px + env(safe-area-inset-bottom)); z-index: 2147483646;\n  display: flex; align-items: center; gap: 6px; border: 0; border-radius: 999px; padding: 0 20px; min-height: 52px;\n  background: linear-gradient(135deg, #34D399, #047857); color: #fff; font: 700 17px/1 system-ui, -apple-system, sans-serif;\n  box-shadow: 0 8px 24px rgba(0,0,0,.3);\n}\n\n.app {\n  position: fixed; inset: 0; z-index: 2147483647; display: flex; flex-direction: column;\n  background: var(--bg); color: var(--text); font: 16px/1.4 system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif;\n  -webkit-text-size-adjust: 100%;\n}\n.top { background: var(--header); color: #fff; padding: calc(env(safe-area-inset-top) + 10px) 16px 12px; flex: none; }\n.top-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; max-width: 900px; margin: 0 auto; }\n.top-actions { display: flex; }\nh1 { font-size: 1.35rem; margin: 0; }\n.subtitle { margin: 2px 0 0; font-size: .85rem; opacity: .85; }\n.icon-btn { background: transparent; border: 0; border-radius: 50%; width: 44px; height: 44px; display: grid; place-items: center; font-size: 20px; }\n.icon-btn.on-dark { color: #fff; }\n.icon-btn.spin { animation: spin 1s linear infinite; }\n@keyframes spin { to { transform: rotate(360deg); } }\n.search { display: flex; align-items: center; gap: 8px; background: var(--search); border-radius: 12px; padding: 0 12px; margin: 10px auto 0; max-width: 900px; min-height: 50px; }\n.search input { flex: 1; min-width: 0; background: transparent; border: 0; color: #fff; font-size: 16px; padding: 12px 0; }\n.search input::placeholder { color: rgba(255,255,255,.7); }\n.search input:focus { outline: none; }\n\n.scroll { flex: 1; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding-bottom: calc(32px + env(safe-area-inset-bottom)); }\n.scroll > * { max-width: 900px; margin-left: auto; margin-right: auto; }\n.banner { display: flex; align-items: center; gap: 10px; margin: 12px; border-radius: 12px; padding: 8px 8px 8px 14px; }\n.banner span { flex: 1; }\n.banner.warn { background: var(--amber-bg); color: var(--amber-fg); }\n.banner.bad { background: var(--red-bg); color: var(--red-fg); }\n.banner.info { background: var(--sky-bg); color: var(--sky-fg); }\n.text-btn { background: none; border: 0; font-weight: 700; padding: 10px 12px; min-height: 44px; border-radius: 8px; }\n\n.controls { padding: 12px 12px 4px; }\n.segmented { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--outline); border-radius: 999px; overflow: hidden; }\n.segmented button { background: transparent; border: 0; min-height: 44px; font-weight: 600; }\n.segmented button + button { border-left: 1px solid var(--outline); }\n.segmented button[aria-checked=\"true\"] { background: var(--sky-bg); color: var(--sky-fg); }\n.segmented button[aria-checked=\"true\"]::before { content: \"✓ \"; }\n.store-row { display: flex; align-items: center; gap: 10px; width: 100%; margin-top: 8px; padding: 8px 12px; min-height: 52px;\n  background: var(--surface-2); border: 0; border-radius: 12px; text-align: left; }\n.store-text { flex: 1; display: flex; flex-direction: column; }\n.store-text small { color: var(--muted); }\n.chips { display: flex; gap: 8px; overflow-x: auto; padding: 8px 2px 0; scrollbar-width: none; }\n.chips::-webkit-scrollbar { display: none; }\n.chip { flex: none; border: 1px solid var(--outline); background: transparent; border-radius: 8px; min-height: 36px; padding: 6px 14px; font-weight: 600; color: var(--muted); white-space: nowrap; }\n.chip[aria-pressed=\"true\"] { background: var(--sky-bg); color: var(--sky-fg); border-color: transparent; }\n.chip[aria-pressed=\"true\"]::before { content: \"✓ \"; }\n.chip.clear::after { content: \" ✕\"; }\n\n.summary { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 8px; background: var(--bg); padding: 10px 12px 8px 16px; border-bottom: 1px solid var(--hairline); }\n.count { flex: 1 0 auto; font-weight: 700; white-space: nowrap; }\n.tonal-btn { display: inline-flex; align-items: center; gap: 6px; background: var(--sky-bg); color: var(--sky-fg); border: 0; border-radius: 999px; min-height: 40px; padding: 0 12px; font-weight: 700; white-space: nowrap; }\n.tonal-btn.wide { justify-content: center; }\n.sort select { background: transparent; color: var(--link); border: 0; font: inherit; font-weight: 700; min-height: 40px; max-width: 36vw; text-overflow: ellipsis; }\n\n.list { list-style: none; margin: 0 auto; padding: 8px 12px; display: grid; gap: 8px; }\n@media (min-width: 760px) { .list { grid-template-columns: 1fr 1fr; } }\n.card { background: var(--surface); border: 1px solid var(--hairline); border-radius: 16px; display: grid; grid-template-columns: 88px 1fr; gap: 12px; padding: 12px 6px 6px 12px; }\n.thumb { width: 88px; height: 88px; border-radius: 12px; border: 1px solid var(--hairline); background: #fff; display: grid; place-items: center; overflow: hidden; text-decoration: none; font-size: 32px; }\n.thumb.none { background: var(--surface-2); }\n.thumb img { width: 82px; height: 82px; object-fit: contain; padding: 4px; }\n.body { min-width: 0; display: flex; flex-direction: column; gap: 4px; }\n.brandline { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }\n.brand { font-size: .75rem; letter-spacing: .06em; font-weight: 800; color: var(--link); text-transform: uppercase; }\n.title { font-weight: 600; color: var(--text); text-decoration: none; padding-right: 8px;\n  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }\n.prices { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }\n.price { font-size: 1.35rem; font-weight: 800; color: var(--price); }\n.was { color: var(--muted); text-decoration: line-through; }\n.tag { font-size: .75rem; font-weight: 800; border-radius: 6px; padding: 2px 6px; }\n.tag.off, .tag.drop { background: var(--em-bg); color: var(--em-fg); }\n.tag.new { background: var(--sky-bg); color: var(--sky-fg); }\n.note { font-size: .85rem; color: var(--muted); }\n.pills { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }\n.pill { background: var(--surface-2); color: var(--muted); font-size: .8rem; border-radius: 6px; padding: 2px 6px; }\n.rating { font-size: .85rem; color: var(--muted); }\n.foot { display: flex; align-items: center; min-height: 44px; }\n.stock { flex: 1; display: flex; align-items: center; gap: 6px; font-size: .9rem; font-weight: 500; }\n.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--outline); flex: none; }\n.dot.good { background: var(--em-fg); }\n.dot.bad { background: var(--red-fg); }\n.foot .icon-btn { color: var(--muted); }\n\n.status { text-align: center; padding: 40px 28px; display: grid; justify-items: center; gap: 8px; }\n.badge { width: 88px; height: 88px; border-radius: 50%; display: grid; place-items: center; background: var(--sky-bg); font-size: 40px; }\n.status h2 { margin: 8px 0 0; font-size: 1.15rem; }\n.status p { margin: 0; color: var(--muted); max-width: 460px; }\n.actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 8px; }\n.primary-btn { background: var(--navy); color: #fff; border: 0; border-radius: 999px; min-height: 44px; padding: 0 20px; font-weight: 700; }\n@media (prefers-color-scheme: dark) { .primary-btn { background: var(--sky); color: var(--navy-dark); } }\na.primary-btn { display: inline-flex; align-items: center; text-decoration: none; }\n.outline-btn { background: transparent; border: 1px solid var(--outline); border-radius: 999px; min-height: 44px; padding: 0 18px; font-weight: 700; }\n.skeleton { height: 140px; border-radius: 16px; background: linear-gradient(90deg, var(--surface-2), var(--surface), var(--surface-2)); background-size: 200% 100%; animation: shimmer 1.4s infinite; }\n@keyframes shimmer { to { background-position: -200% 0; } }\n@media (prefers-reduced-motion: reduce) { .skeleton, .icon-btn.spin { animation: none; } }\n\n.sheet-wrap { position: absolute; inset: 0; background: rgba(0,0,0,.5); display: flex; align-items: flex-end; justify-content: center; z-index: 5; }\n.sheet { background: var(--surface); color: var(--text); width: 100%; max-width: 720px; max-height: 88%; overflow-y: auto; overscroll-behavior: contain;\n  border-radius: 20px 20px 0 0; padding: 20px 16px calc(16px + env(safe-area-inset-bottom)); display: grid; gap: 12px; }\n@media (min-width: 760px) { .sheet-wrap { align-items: center; } .sheet { border-radius: 20px; } }\n.sheet h2 { margin: 0; font-size: 1.25rem; }\n.store-form { display: flex; gap: 8px; }\n.store-form input { flex: 1; min-width: 0; font-size: 16px; padding: 12px; border: 1px solid var(--outline); border-radius: 12px; background: var(--surface); color: var(--text); }\n.stores { display: grid; gap: 8px; }\n.store { display: flex; gap: 8px; text-align: left; background: var(--surface-2); border: 2px solid transparent; border-radius: 12px; padding: 12px; }\n.store.selected { background: var(--sky-bg); border-color: var(--sky-fg); }\n.store[aria-disabled=\"true\"] { opacity: .7; }\n.store-main { flex: 1; display: flex; flex-direction: column; }\n.store-main span, .store-main small { color: var(--muted); }\n.store-main small.err { color: var(--red-fg); }\n.dist { color: var(--link); font-weight: 700; white-space: nowrap; }\n.scope { background: var(--sky-bg); color: var(--sky-fg); border-radius: 12px; padding: 12px; }\n.scope b { display: block; }\n.sheet-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }\n.sheet-actions button { min-height: 48px; }\ndetails summary { cursor: pointer; font-weight: 700; min-height: 44px; display: flex; align-items: center; }\npre { white-space: pre-wrap; background: var(--surface-2); border-radius: 12px; padding: 12px; max-height: 300px; overflow: auto; font-size: 12px; margin: 0; }\n.close { justify-self: end; }\n.toast { position: absolute; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom)); transform: translateX(-50%); background: #1E293B; color: #fff; padding: 12px 18px; border-radius: 12px; max-width: calc(100% - 32px); z-index: 6; }\n\n.share-line { display: flex; align-items: center; gap: 4px; margin: 0 12px 12px; padding: 4px 4px 4px 14px; border-radius: 12px; background: var(--surface-2); color: var(--muted); font-size: .9rem; }\n.share-line span { flex: 1; }\n.share-line a { color: var(--link); text-decoration: none; }\n\n.foot-note { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; column-gap: 14px; color: var(--muted); font-size: .8rem; padding: 4px 16px 24px; }\n.link-btn { background: none; border: 0; color: inherit; text-decoration: underline; font: inherit; padding: 8px 4px; min-height: 40px; cursor: pointer; }\n.app:focus { outline: none; }\n";
+const __VSX_VERSION__ = "3.1.1.48";
 const __VSX_HOME__ = "https://dn.tail59aab8.ts.net:10000/";
 // Pure deal logic shared by the web app and its tests. Mirrors the Android app's
 // DealItem / DealFilters / AiPrompt so both show identical prices and orderings.
@@ -499,9 +499,17 @@ function todaysHours(lines, date = new Date()) {
     if (res.status === 403) throw new Blocked('Vitamin Shoppe wants to confirm a person is browsing.');
     if (!res.ok && res.status !== 404) throw new Error(`Vitamin Shoppe answered ${res.status}.`);
     let data;
-    try { data = await res.json(); } catch {
-      if (!res.ok) throw new Error(`Vitamin Shoppe answered ${res.status}.`);
-      throw new Blocked('Vitamin Shoppe wants to confirm a person is browsing.');
+    const text = await res.text().catch(() => '');
+    try { data = JSON.parse(text); } catch {
+      if (res.status === 404) {
+        if (url.includes('/search/product/search')) throw new Error('Vitamin Shoppe sent an empty clearance list.');
+        if (url.includes('get-stores-with-inv')) throw new Error('Store search is unavailable right now. Try again in a minute.');
+        throw new Error('Vitamin Shoppe didn\'t answer as expected.');
+      }
+      // A page instead of data: DataDome's check is a person-check; anything else (Wi-Fi login,
+      // maintenance page) isn't, and "Reload page" wouldn't help.
+      if (res.headers.get('x-datadome') || /captcha-delivery|datadome/i.test(text)) throw new Blocked('Vitamin Shoppe wants to confirm a person is browsing.');
+      throw new Error('Vitamin Shoppe sent an unexpected page.');
     }
     if (!res.ok && !isListingDespiteStatus(res.status, data)) {
       if (res.status === 404 && url.includes('/search/product/search')) {
@@ -597,13 +605,18 @@ function todaysHours(lines, date = new Date()) {
       }
       if (!state.changes.newIds.size && !state.changes.drops.size) state.onlyChanges = false;
       put('marks', { newIds: [...state.changes.newIds], drops: Object.fromEntries(state.changes.drops) });
+      errorRetries = 0;
       if (state.store) loadStock({ onlyMissing: !stockIsDue() }); else publish();
     } catch (e) {
       state.error = e.message; state.blocked = e instanceof Blocked; state.siteChanged = e instanceof SiteChanged;
+      if (!state.blocked && !state.siteChanged) nextErrorRetry = Date.now() + Math.min(15 * 2 ** errorRetries++, 120) * 60_000;
     } finally {
       state.loading = false; render();
     }
   }
+
+  // Gentle automatic retries while the overlay sits open on an error: 15 min, 30, 60, then every 2 h.
+  let errorRetries = 0, nextErrorRetry = 0, stockRetries = 0, nextStockRetry = 0;
 
   let stockRun = 0;
   /** Shelf stock for the chosen store. With onlyMissing, fresh stock is kept and only new items are asked about. */
@@ -612,34 +625,45 @@ function todaysHours(lines, date = new Date()) {
     if (!store || !state.raw.length) return;
     const run = ++stockRun;
     const keep = onlyMissing && hasStock() ? state.stock : null;
+    // A full re-check starts from the old counts so batches it never reaches keep their last value.
+    const prev = !keep && hasStock() ? state.stock : null;
     let skus = [...new Set(state.raw.map((o) => o.jda).filter(Boolean))];
+    const total = skus.length;
     if (keep) skus = skus.filter((s) => !(s in keep.map));
     if (keep && !skus.length) { publish(); return; }
     state.stockLoading = true; state.stockError = null; state.stockBlocked = false; render();
-    const map = keep ? { ...keep.map } : {};
+    const map = keep ? { ...keep.map } : prev ? { ...prev.map } : {};
+    let reached = 0;
     try {
       for (let i = 0; i < skus.length; i += 100) {
         const batch = skus.slice(i, i + 100);
         Object.assign(map, Object.fromEntries(batch.map((s) => [s, 0])), parseInventory(await getJson(inventoryUrl(store.id, batch))));
+        reached += batch.length;
       }
       if (run !== stockRun || state.store?.id !== store.id) return;
       state.stock = { storeId: store.id, at: keep ? keep.at : Date.now(), map };
       put('stock', state.stock);
+      stockRetries = 0;
       rebuild();
       publish();
     } catch (e) {
       if (run === stockRun) {
         // Batches that did answer still count; items never reached stay "unknown".
-        if (Object.keys(map).length && state.store?.id === store.id) {
-          state.stock = { storeId: store.id, at: keep ? keep.at : Date.now(), map };
+        // (partial: stays "due", so the rest is asked for again)
+        if (reached && state.store?.id === store.id) {
+          state.stock = { storeId: store.id, at: keep ? keep.at : prev ? prev.at : Date.now(), map, partial: true };
           put('stock', state.stock);
           rebuild();
         }
         state.stockBlocked = e instanceof Blocked;
-        // 6. the title already says "Quick check needed"; the body says what for and what to do
+        if (!state.stockBlocked) nextStockRetry = Date.now() + Math.min(15 * 2 ** stockRetries++, 120) * 60_000;
+        const missing = skus.length - reached;
+        const connection = /offline|couldn't reach/i.test(e.message);
+        // the title already says "Quick check needed"; the body says what for and what to do
         state.stockError = state.stockBlocked
           ? `Vitamin Shoppe wants to confirm a person is browsing before showing stock at ${store.name}. Tap Reload page, complete any check, and Deals reopens.`
-          : `${e.message.replace(/\.?$/, '.')} Check your connection and try again.`;
+          : (reached ? `Shelf stock is missing for ${missing} of ${total} items. ` : '') +
+            `${e.message.replace(/\.?$/, '.')} ${connection ? 'Check your connection and try again.' : 'Try again in a minute.'}`;
       }
     } finally {
       if (run === stockRun) { state.stockLoading = false; render(); }
@@ -702,6 +726,12 @@ function todaysHours(lines, date = new Date()) {
     } finally {
       storeSearch.searching = false; renderSheet();
     }
+    // Say how many were found and put focus on the first, for keyboard and screen-reader users.
+    if (!storeSearch.message && storeSearch.results.length && state.sheet === 'stores') {
+      toast(`${storeSearch.results.length} store${storeSearch.results.length === 1 ? '' : 's'} found`);
+      const first = ref('sheet').querySelector('.store');
+      if (first) first.focus({ preventScroll: true });
+    }
   }
 
   // ------------------------------------------------------------------- UI shell
@@ -734,22 +764,27 @@ function todaysHours(lines, date = new Date()) {
         <div class="share-line" data-ref="shareLine" hidden></div>
         <p class="foot-note" data-ref="footNote"></p>
       </div>
-      <div class="sheet-wrap" data-ref="sheetWrap" hidden><div class="sheet" data-ref="sheet" role="dialog" aria-modal="true"></div></div>
+      <div class="sheet-wrap" data-ref="sheetWrap" hidden><div class="sheet" data-ref="sheet" role="dialog" aria-modal="true" aria-labelledby="vsx-sheet-title"></div></div>
       <div class="toast" data-ref="toast" role="status" aria-live="polite" hidden></div>
     </div>`;
   const ref = (n) => root.querySelector(`[data-ref="${n}"]`);
   const app = root.querySelector('.app');
   const launcher = root.querySelector('.launcher');
 
+  let reopenAfterCheck = false;
   function openApp() {
+    // Stepped aside for the site's check: open once it's done instead of locking the page underneath.
+    if (!host.isConnected) { reopenAfterCheck = true; return; }
     state.open = true; app.hidden = false; launcher.hidden = true;
+    // So Back from a product page lands in Deals again (the site's own history state is kept).
+    if (location.hash !== '#vsdeals') history.replaceState(history.state, '', location.pathname + location.search + '#vsdeals');
     document.documentElement.style.overflow = 'hidden';
     render();
     if (listIsOld()) loadDeals(); else if (stockIsDue()) loadStock();
     // Esc works straight away (focus starts on the page underneath).
     app.focus({ preventScroll: true });
   }
-  function stockIsDue() { return !!state.store && (!hasStock() || Date.now() - (state.stock.at || 0) > 6 * 3600e3); }
+  function stockIsDue() { return !!state.store && (!hasStock() || !!state.stock.partial || Date.now() - (state.stock.at || 0) > 6 * 3600e3); }
   // One rule everywhere: a list older than 10 minutes refreshes on open, on reconnect and on return.
   function listIsOld() { return !state.savedAt || Date.now() - state.savedAt > 10 * 60_000; }
   window.addEventListener('online', () => {
@@ -764,20 +799,25 @@ function todaysHours(lines, date = new Date()) {
   // on the same rule. Errors wait for Retry / reconnect so a failing site isn't hammered.
   setInterval(() => {
     if (!state.open || document.visibilityState !== 'visible' || state.loading || state.stockLoading) return;
-    if (!state.error && !state.blocked && listIsOld()) loadDeals();
-    else if (!state.stockError && stockIsDue()) loadStock();
-    else if (state.savedAt) {
-      // Only the time-based text: rebuilding the list would knock keyboard focus and scroll about.
+    const now = Date.now();
+    if (state.error) { if (!state.blocked && !state.siteChanged && now >= nextErrorRetry) return loadDeals(); }
+    else if (!state.blocked && listIsOld()) return loadDeals();
+    if (state.stockError) {
+      if (!state.stockBlocked && now >= nextStockRetry) return loadStock({ onlyMissing: hasStock() && now - state.stock.at < 6 * 3600e3 });
+    } else if (stockIsDue()) return loadStock({ onlyMissing: hasStock() && !!state.stock.partial });
+    // Only the time-based text: rebuilding the list would knock keyboard focus and scroll about.
+    if (state.savedAt) {
       const n = changeIds().size;
       ref('subtitle').textContent = `Updated ${relativeTime(state.savedAt)}` + (n ? ` · ${n} new or cheaper` : '');
     }
+    renderBanner();
   }, 60_000);
 
   function closeApp() {
     state.open = false; app.hidden = true; launcher.hidden = !get('launcher', true);
     document.documentElement.style.overflow = '';
     if (!launcher.hidden) launcher.focus({ preventScroll: true });
-    if (location.hash === '#vsdeals') history.replaceState(null, '', location.pathname + location.search);
+    if (location.hash === '#vsdeals') history.replaceState(history.state, '', location.pathname + location.search);
   }
 
   function toast(text) {
@@ -807,6 +847,17 @@ function todaysHours(lines, date = new Date()) {
   };
 
   function render() {
+    const a = root.activeElement;
+    const act = a && a.dataset ? a.dataset.act : null, v = a && a.dataset ? a.dataset.v : undefined;
+    renderNow();
+    // Rebuilt buttons drop keyboard focus: put it back on the same one (or the app) so Tab doesn't start over.
+    if (act && state.open && !(root.activeElement && root.activeElement.isConnected)) {
+      const same = v == null ? null : [...root.querySelectorAll(`[data-act="${act}"]`)].find((el) => el.dataset.v === v);
+      const t = same || root.querySelector(`[data-act="${act}"]`);
+      (t && t.offsetParent ? t : app).focus({ preventScroll: true });
+    }
+  }
+  function renderNow() {
     if (!state.open) return;
     renderFootNote();
     renderShareLine();
@@ -815,26 +866,7 @@ function todaysHours(lines, date = new Date()) {
       : state.savedAt ? `Updated ${relativeTime(state.savedAt)}` + (n ? ` · ${n} new or cheaper` : '') : 'Live from vitaminshoppe.com';
     root.querySelector('[data-act="refresh"]').classList.toggle('spin', state.loading || state.stockLoading);
 
-    const banner = ref('banner');
-    if (state.blocked && state.items.length) {
-      banner.innerHTML = `<div class="banner warn"><span><b>Quick check needed</b> to refresh · ${savedPhrase()}. Reload, complete Vitamin Shoppe's check, and Deals reopens.</span>
-        <button class="text-btn" data-act="reload-page">Reload page</button></div>`;
-    } else if (state.error && state.items.length) {
-      banner.innerHTML = `<div class="banner warn"><span><b>Couldn't refresh.</b> ${esc(state.error.replace(/\.$/, ''))} · ${savedPhrase()}.</span>` +
-        (state.siteChanged ? `<a class="text-btn" href="${esc(__VSX_HOME__)}vs-clearance.user.js" target="_blank" rel="noopener">Update</a>` : '') +
-        '<button class="text-btn" data-act="refresh">Retry</button></div>';
-    } else if (state.partialNote) {
-      banner.innerHTML = `<div class="banner warn"><span>${esc(state.partialNote)}</span><button class="text-btn" data-act="refresh">Retry</button></div>`;
-    } else if (state.stockError && state.mode === 'ship') {
-      banner.innerHTML = `<div class="banner info"><span>Shelf stock at ${esc(state.store?.name || 'your store')} ${state.stockBlocked ? 'needs a quick check' : "couldn't be checked"}.</span><button class="text-btn" data-act="${state.stockBlocked ? 'reload-page' : 'retry-stock'}">${state.stockBlocked ? 'Reload page' : 'Retry'}</button></div>`;
-    } else if (state.stockError && !(state.mode === 'pickup' && (!hasStock() || !visible().length))) {
-      // (In pickup with nothing to show, the full-page panel below says it instead.)
-      const age = hasStock() ? ` · showing stock checked ${relativeTime(state.stock.at)}` : '';
-      banner.innerHTML = `<div class="banner bad"><span>${esc(state.stockError.replace(/\.$/, ''))}${age}.</span><button class="text-btn" data-act="${state.stockBlocked ? 'reload-page' : 'retry-stock'}">${state.stockBlocked ? 'Reload page' : 'Retry'}</button></div>`;
-    } else if (hasStock() && !state.stockLoading && Date.now() - (state.stock.at || 0) > 6 * 3600e3) {
-      // 7. shelf stock's age said once, not on every card
-      banner.innerHTML = `<div class="banner info"><span>Shelf stock at ${esc(state.store.name)} was checked ${relativeTime(state.stock.at)}.</span><button class="text-btn" data-act="retry-stock">Check now</button></div>`;
-    } else banner.innerHTML = '';
+    renderBanner();
 
     const list = ref('list'); const status = ref('status');
     const have = state.items.length > 0;
@@ -876,6 +908,33 @@ function todaysHours(lines, date = new Date()) {
     if (!deals.length) { list.innerHTML = ''; status.hidden = false; status.innerHTML = noMatchesHtml(); return; }
     status.hidden = true;
     list.innerHTML = deals.map(cardHtml).join('');
+  }
+
+  let lastBannerHtml = null;
+  function renderBanner() {
+    let html = '';
+    if (state.blocked && state.items.length) {
+      html = `<div class="banner warn"><span><b>Quick check needed</b> to refresh · ${savedPhrase()}. Reload, complete Vitamin Shoppe's check, and Deals reopens.</span>
+        <button class="text-btn" data-act="reload-page">Reload page</button></div>`;
+    } else if (state.error && state.items.length) {
+      html = `<div class="banner warn"><span><b>Couldn't refresh.</b> ${esc(state.error.replace(/\.$/, ''))} · ${savedPhrase()}.</span>` +
+        (state.siteChanged ? `<a class="text-btn" href="${esc(__VSX_HOME__)}vs-clearance.user.js" target="_blank" rel="noopener">Update</a>` : '') +
+        '<button class="text-btn" data-act="refresh">Retry</button></div>';
+    } else if (state.partialNote) {
+      html = `<div class="banner warn"><span>${esc(state.partialNote)}</span><button class="text-btn" data-act="refresh">Retry</button></div>`;
+    } else if (state.stockError && state.mode === 'ship') {
+      html = `<div class="banner info"><span>Shelf stock at ${esc(state.store?.name || 'your store')} ${state.stockBlocked ? 'needs a quick check' : "couldn't be checked"}.</span><button class="text-btn" data-act="${state.stockBlocked ? 'reload-page' : 'retry-stock'}">${state.stockBlocked ? 'Reload page' : 'Retry'}</button></div>`;
+    } else if (state.stockError && !(state.mode === 'pickup' && (!hasStock() || !visible().length))) {
+      // (In pickup with nothing to show, the full-page panel below says it instead.)
+      const age = hasStock() ? ` · showing stock checked ${relativeTime(state.stock.at)}` : '';
+      html = `<div class="banner bad"><span>${esc(state.stockError.replace(/\.$/, ''))}${age}.</span><button class="text-btn" data-act="${state.stockBlocked ? 'reload-page' : 'retry-stock'}">${state.stockBlocked ? 'Reload page' : 'Retry'}</button></div>`;
+    } else if (hasStock() && !state.stockLoading && Date.now() - (state.stock.at || 0) > 6 * 3600e3) {
+      // 7. shelf stock's age said once, not on every card
+      html = `<div class="banner info"><span>Shelf stock at ${esc(state.store.name)} was checked ${relativeTime(state.stock.at)}.</span><button class="text-btn" data-act="retry-stock">Check now</button></div>`;
+    } else html = '';
+    if (html === lastBannerHtml) return;
+    lastBannerHtml = html;
+    ref('banner').innerHTML = html;
   }
 
   function renderControls() {
@@ -976,6 +1035,8 @@ function todaysHours(lines, date = new Date()) {
   let promptText = '';
   function renderSheet() {
     const sheet = ref('sheet');
+    const oldInput = sheet.querySelector('form input');
+    const typed = oldInput ? oldInput.value : null, typing = oldInput && root.activeElement === oldInput;
     if (state.sheet === 'stores') {
       const rows = storeSearch.results.map((s) => {
         const why = s.closed ? 'Temporarily closed' : !s.pickup ? 'No in-store pickup' : null;
@@ -986,19 +1047,21 @@ function todaysHours(lines, date = new Date()) {
             ${today ? `<small class="${why ? 'err' : ''}">${esc(today)}</small>` : ''}</span>
           <span class="dist">${s.dist >= 0 ? (s.dist < 10 ? s.dist.toFixed(1) : Math.round(s.dist)) + ' mi' : ''}</span></button>`;
       }).join('');
-      sheet.innerHTML = `<h2>Choose your store</h2><p class="muted">We'll check which clearance items are on the shelf there.</p>
+      sheet.innerHTML = `<h2 id="vsx-sheet-title">Choose your store</h2><p class="muted">We'll check which clearance items are on the shelf there.</p>
         <form data-ref="storeForm" class="store-form"><input type="search" inputmode="search" placeholder="ZIP code or City, ST" value="${esc(storeSearch.query)}" aria-label="ZIP code or city">
-          <button class="primary-btn" type="submit">${storeSearch.searching ? '…' : 'Search'}</button></form>
+          <button class="primary-btn" type="submit"${storeSearch.searching ? ' disabled aria-busy="true"' : ''}>${storeSearch.searching ? 'Searching…' : 'Search'}</button></form>
         ${storeSearch.message ? `<p class="err">${esc(storeSearch.message)}${storeSearch.blocked ? ' Reload the page, complete any check, then search again.' : ''}</p>${storeSearch.blocked ? '<button class="outline-btn" data-act="reload-page">Reload page</button>' : ''}` : ''}
         <div class="stores">${rows}</div>
         ${state.store ? '<button class="outline-btn" data-act="clear-store">Clear store · ship to home only</button>' : ''}
         <button class="text-btn close" data-act="close-sheet">Close</button>`;
+      const input = sheet.querySelector('form input');
+      if (input && typed != null) { input.value = typed; if (typing) input.focus({ preventScroll: true }); }
     } else if (state.sheet === 'prompt') {
       const deals = visible(); const shown = Math.min(deals.length, AI_MAX_ITEMS);
       promptText = aiPrompt(deals, deals.length, state.store, state.mode);
       const scope = [state.mode === 'pickup' && state.store ? `On the shelf at ${state.store.name}` : 'Ship to home',
         state.floor && `${state.floor}%+ off`, state.category, state.query && `“${state.query.trim()}”`].filter(Boolean).join(' · ');
-      sheet.innerHTML = `<h2>Ask an AI which deals are worth it</h2>
+      sheet.innerHTML = `<h2 id="vsx-sheet-title">Ask an AI which deals are worth it</h2>
         <p class="muted">Paste into ChatGPT, Claude, Gemini or similar for an evidence score, absorption rating, value per dose and a BUY / CONSIDER / PASS verdict.</p>
         <div class="scope"><b>${deals.length > shown ? `Top ${shown} of ${deals.length} deals` : `${shown} deals`}</b>${esc(scope)}</div>
         <div class="sheet-actions"><button class="primary-btn" data-act="copy-prompt">Copy prompt</button>${navigator.share ? '<button class="tonal-btn wide" data-act="share-prompt">Share</button>' : ''}</div>
@@ -1009,17 +1072,7 @@ function todaysHours(lines, date = new Date()) {
 
   // ------------------------------------------------------------------- events
 
-  function update(fn) {
-    const a = root.activeElement;
-    const act = a && a.dataset ? a.dataset.act : null, v = a && a.dataset ? a.dataset.v : undefined;
-    fn(); prefs(); render();
-    // render() replaces the buttons; put focus back on the same one so Tab doesn't start over.
-    if (act && !(root.activeElement && root.activeElement.isConnected)) {
-      const same = v == null ? null : [...root.querySelectorAll(`[data-act="${act}"]`)].find((el) => el.dataset.v === v);
-      const t = same || root.querySelector(`[data-act="${act}"]`);
-      if (t && t.offsetParent) t.focus({ preventScroll: true });
-    }
-  }
+  function update(fn) { fn(); prefs(); render(); }
 
   root.addEventListener('click', async (e) => {
     const el = e.target.closest('[data-act]');
@@ -1067,7 +1120,7 @@ function todaysHours(lines, date = new Date()) {
         if (row) row.focus({ preventScroll: true });
         await loadStock();
         // 5. say "none" plainly rather than "0 items"
-        if (hasStock()) {
+        if (hasStock() && !state.stockError) {
           const onShelf = state.items.filter((d) => d.qty > 0).length;
           toast(onShelf ? `${onShelf} clearance item${onShelf === 1 ? '' : 's'} on the shelf at ${s.name}` : `None of the clearance items are on the shelf at ${s.name}`);
         }
@@ -1167,33 +1220,48 @@ function todaysHours(lines, date = new Date()) {
     return !!document.querySelector('iframe[src*="captcha-delivery.com"]') || !!(dd && dd.host);
   }
 
+  /**
+   * The site's check can appear at any time (at load, or over the page after a refused request).
+   * Step aside while it's up — never touching it — and come back, reopened if Deals was open, once
+   * the user has finished it. Checked at most every 300 ms (the store's page mutates constantly),
+   * plus a slow poll for checks that change only page variables.
+   */
+  function checkWatch() {
+    const check = onCheckPage();
+    if (check && host.isConnected) {
+      reopenAfterCheck = reopenAfterCheck || state.open;
+      state.open = false; // stops the reconnect / tab-return refreshes too
+      host.remove();
+      document.documentElement.style.overflow = '';
+    } else if (!check && !host.isConnected) {
+      document.body.appendChild(host);
+      if (reopenAfterCheck) { reopenAfterCheck = false; openApp(); }
+    }
+  }
   function mount() {
     if (!document.body) return setTimeout(mount, 50);
-    // Leave the check alone (and keep #vsdeals, so Deals opens when the page reloads after it).
-    if (onCheckPage()) return;
-    document.body.appendChild(host);
-    // The automatic check can add its frame after load, however slow the phone: watch the page for
-    // it and step aside when it appears. (Our own nodes live in a shadow root, so they don't trigger this.)
-    // Checked at most every 300 ms: the store's own page mutates constantly.
     let queued = false;
-    const watch = new MutationObserver(() => {
+    new MutationObserver(() => {
       if (queued) return;
       queued = true;
-      setTimeout(() => {
-        queued = false;
-        if (!onCheckPage()) return;
-        watch.disconnect();
-        state.open = false; // stops the reconnect / tab-return refreshes too
-        host.remove();
-        document.documentElement.style.overflow = '';
-      }, 300);
-    });
-    watch.observe(document.documentElement, { childList: true, subtree: true });
+      setTimeout(() => { queued = false; checkWatch(); }, 300);
+    }).observe(document.documentElement, { childList: true, subtree: true });
+    setInterval(checkWatch, 2000);
     const paired = takePairing();
     // Coming in through #vsdeals brings a hidden Deals button back.
     if (location.hash === '#vsdeals') put('launcher', true);
     launcher.hidden = !get('launcher', true);
+    // Leave a check alone; Deals mounts (and opens, if asked) once it's done.
+    if (onCheckPage()) { reopenAfterCheck = !!paired || location.hash === '#vsdeals'; return; }
+    document.body.appendChild(host);
+    // Back from a product page: the same search and scroll position as before.
+    let view = null;
+    try { view = JSON.parse(sessionStorage.getItem('vsx.view') || 'null'); sessionStorage.removeItem('vsx.view'); } catch { /* private mode */ }
+    if (view && Date.now() - view.at < 30 * 60_000 && location.hash === '#vsdeals') {
+      state.query = view.q || ''; ref('q').value = state.query;
+    }
     if (paired || location.hash === '#vsdeals') openApp();
+    if (view && state.open && view.top) requestAnimationFrame(() => { ref('scroll').scrollTop = view.top; });
     let reopen = null;
     try { reopen = sessionStorage.getItem('vsx.reopen'); sessionStorage.removeItem('vsx.reopen'); } catch { /* private mode */ }
     if (reopen === 'stores' && state.open) openSheet('stores');
@@ -1201,6 +1269,10 @@ function todaysHours(lines, date = new Date()) {
   }
   mount();
   window.addEventListener('hashchange', () => { if (location.hash === '#vsdeals' && !state.open) openApp(); });
+  window.addEventListener('pagehide', () => {
+    if (!state.open) return;
+    try { sessionStorage.setItem('vsx.view', JSON.stringify({ q: state.query, top: ref('scroll').scrollTop, at: Date.now() })); } catch { /* private mode */ }
+  });
 })();
 
 })();

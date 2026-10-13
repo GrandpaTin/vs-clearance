@@ -30,11 +30,22 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.AbstractCoroutineContextElement
+import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 import java.io.ByteArrayInputStream
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+
+/**
+ * Marks a background (not user-started) request: if Vitamin Shoppe asks for its human check, the
+ * request just fails with VerificationRequired and the check waits until the user taps Check now.
+ */
+class QuietChallenge : AbstractCoroutineContextElement(QuietChallenge) {
+    companion object : CoroutineContext.Key<QuietChallenge>
+}
 
 /**
  * A long-lived, invisible browser tab on vitaminshoppe.com used to call the site's JSON APIs.
@@ -237,11 +248,12 @@ class WebSession(context: Context) : JsonFetcher {
     // -------------------------------------------------------------------------------------------
 
     private suspend fun ensureReady() = readyLock.withLock {
+        val quiet = coroutineContext[QuietChallenge]
         withContext(Dispatchers.Main) {
             when (pageState) {
                 PageState.READY -> return@withContext
                 PageState.CHALLENGE -> {
-                    _challengeVisible.value = true
+                    if (quiet == null) _challengeVisible.value = true
                     throw FetchException.VerificationRequired()
                 }
                 else -> Unit
@@ -268,7 +280,7 @@ class WebSession(context: Context) : JsonFetcher {
             when (outcome) {
                 PageState.READY -> Unit
                 PageState.CHALLENGE -> {
-                    _challengeVisible.value = true
+                    if (quiet == null) _challengeVisible.value = true
                     throw FetchException.VerificationRequired()
                 }
                 PageState.FAILED -> {
