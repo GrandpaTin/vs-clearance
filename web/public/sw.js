@@ -25,16 +25,23 @@ self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET' || url.origin !== self.location.origin) return;
   if (url.pathname.endsWith('/api/snapshot')) {
-    e.respondWith(fetch(e.request).then((res) => {
-      if (res.ok) { const copy = res.clone(); caches.open(VERSION).then((c) => c.put('api/snapshot', copy)); }
-      return res;
-    }).catch(() => caches.match('api/snapshot').then((r) => {
-      if (!r) return Response.error();
+    const fromCache = () => caches.match('api/snapshot').then((r) => {
+      if (!r) return null;
       // Tell the page this is the saved copy so it says "offline" rather than "updated".
       const headers = new Headers(r.headers);
       headers.set('X-From-Cache', '1');
       return r.blob().then((b) => new Response(b, { status: 200, headers }));
-    })));
+    });
+    const network = fetch(e.request).then((res) => {
+      if (res.ok) { const copy = res.clone(); caches.open(VERSION).then((c) => c.put('api/snapshot', copy)); }
+      return res;
+    });
+    network.catch(() => {}); // if the saved copy wins, a later network failure is no one's business
+    // A request that hangs (weak in-store signal) never fails, so after 8 s answer from the saved
+    // copy instead; with nothing saved, keep waiting for the network.
+    const slow = new Promise((resolve) => setTimeout(resolve, 8000)).then(fromCache);
+    e.respondWith(Promise.race([network, slow.then((r) => r || network)])
+      .catch(() => fromCache().then((r) => r || Response.error())));
     return;
   }
   // Shell: network first so a fix reaches everyone on their next visit; the cache is only the

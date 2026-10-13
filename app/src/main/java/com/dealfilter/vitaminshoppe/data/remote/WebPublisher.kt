@@ -273,7 +273,7 @@ class WebPublisher(
         // Rebuild the site from main (a push to `deals` alone runs no workflow).
         val (kick, _) = gitHub("POST", "https://api.github.com/repos/$owner/$name/dispatches", token, JSONObject().put("event_type", "deals"))
         // The list is saved; only the rebuild didn't start. The next sync starts it, so this is "waiting", not an error.
-        return if (kick in 200..299) Outcome(null) else Outcome("Saved; the site will rebuild on the next sync", retryLater = true)
+        return if (kick in 200..299) Outcome(null) else Outcome(null, retryLater = true, note = "Saved; the site will rebuild on the next sync")
     }
 
     /** Outages and rate limits retry by themselves; only a real permission problem asks about the token. */

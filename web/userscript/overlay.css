@@ -47,7 +47,7 @@ h1 { font-size: 1.35rem; margin: 0; }
 .search input::placeholder { color: rgba(255,255,255,.7); }
 .search input:focus { outline: none; }
 
-.scroll { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding-bottom: calc(32px + env(safe-area-inset-bottom)); }
+.scroll { flex: 1; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding-bottom: calc(32px + env(safe-area-inset-bottom)); }
 .scroll > * { max-width: 900px; margin-left: auto; margin-right: auto; }
 .banner { display: flex; align-items: center; gap: 10px; margin: 12px; border-radius: 12px; padding: 8px 8px 8px 14px; }
 .banner span { flex: 1; }
@@ -121,7 +121,7 @@ a.primary-btn { display: inline-flex; align-items: center; text-decoration: none
 @media (prefers-reduced-motion: reduce) { .skeleton, .icon-btn.spin { animation: none; } }
 
 .sheet-wrap { position: absolute; inset: 0; background: rgba(0,0,0,.5); display: flex; align-items: flex-end; justify-content: center; z-index: 5; }
-.sheet { background: var(--surface); color: var(--text); width: 100%; max-width: 720px; max-height: 88%; overflow-y: auto;
+.sheet { background: var(--surface); color: var(--text); width: 100%; max-width: 720px; max-height: 88%; overflow-y: auto; overscroll-behavior: contain;
   border-radius: 20px 20px 0 0; padding: 20px 16px calc(16px + env(safe-area-inset-bottom)); display: grid; gap: 12px; }
 @media (min-width: 760px) { .sheet-wrap { align-items: center; } .sheet { border-radius: 20px; } }
 .sheet h2 { margin: 0; font-size: 1.25rem; }

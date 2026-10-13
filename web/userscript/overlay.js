@@ -36,7 +36,11 @@ import {
       throw new Blocked('Vitamin Shoppe wants to confirm a person is browsing.');
     }
     if (!res.ok && !isListingDespiteStatus(res.status, data)) {
-      if (res.status === 404 && url.includes('/search/product/search')) throw new SiteChanged("Vitamin Shoppe's clearance search changed.");
+      if (res.status === 404 && url.includes('/search/product/search')) {
+        // This endpoint answers 404 normally; an empty one is a hiccup, a different shape is a real change.
+        if (Array.isArray(data?.response?.products)) throw new Error('Vitamin Shoppe sent an empty clearance list.');
+        throw new SiteChanged("Vitamin Shoppe's clearance search changed.");
+      }
       throw new Error(`Vitamin Shoppe answered ${res.status}.`);
     }
     return data;
@@ -104,9 +108,9 @@ import {
       }
       // A cut-short list replaces the saved one only if it's nearly as complete.
       if (partial && raw.length < 0.8 * state.raw.length) throw new Error('Vitamin Shoppe only sent part of the clearance list.');
-      state.partialNote = partial ? `Vitamin Shoppe only sent part of the list (${raw.length} of about ${first.total}).` : null;
       const seen = new Set();
       raw = raw.filter((o) => !seen.has(o.id) && seen.add(o.id));
+      state.partialNote = partial ? `Vitamin Shoppe only sent part of the list (${raw.length} of about ${first.total}).` : null;
       // Clearance is never really empty; an empty answer is a hiccup, so keep the saved list.
       if (!raw.length) throw new Error('Vitamin Shoppe sent an empty clearance list.');
       const previous = state.items;
@@ -167,7 +171,7 @@ import {
         // 6. the title already says "Quick check needed"; the body says what for and what to do
         state.stockError = state.stockBlocked
           ? `Vitamin Shoppe wants to confirm a person is browsing before showing stock at ${store.name}. Tap Reload page, complete any check, and Deals reopens.`
-          : `Couldn't check shelves at ${store.name}. ${e.message}`;
+          : `${e.message.replace(/\.?$/, '.')} Check your connection and try again.`;
       }
     } finally {
       if (run === stockRun) { state.stockLoading = false; render(); }
@@ -292,6 +296,7 @@ import {
   function closeApp() {
     state.open = false; app.hidden = true; launcher.hidden = !get('launcher', true);
     document.documentElement.style.overflow = '';
+    if (!launcher.hidden) launcher.focus({ preventScroll: true });
     if (location.hash === '#vsdeals') history.replaceState(null, '', location.pathname + location.search);
   }
 
@@ -340,6 +345,8 @@ import {
         '<button class="text-btn" data-act="refresh">Retry</button></div>';
     } else if (state.partialNote) {
       banner.innerHTML = `<div class="banner warn"><span>${esc(state.partialNote)}</span><button class="text-btn" data-act="refresh">Retry</button></div>`;
+    } else if (state.stockError && state.mode === 'ship') {
+      banner.innerHTML = `<div class="banner info"><span>Shelf stock at ${esc(state.store?.name || 'your store')} ${state.stockBlocked ? 'needs a quick check' : "couldn't be checked"}.</span><button class="text-btn" data-act="${state.stockBlocked ? 'reload-page' : 'retry-stock'}">${state.stockBlocked ? 'Reload page' : 'Retry'}</button></div>`;
     } else if (state.stockError && !(state.mode === 'pickup' && !hasStock())) {
       banner.innerHTML = `<div class="banner bad"><span>${esc(state.stockError)}</span><button class="text-btn" data-act="${state.stockBlocked ? 'reload-page' : 'retry-stock'}">${state.stockBlocked ? 'Reload page' : 'Retry'}</button></div>`;
     } else if (hasStock() && !state.stockLoading && Date.now() - (state.stock.at || 0) > 6 * 3600e3) {
@@ -464,15 +471,25 @@ import {
 
   // ------------------------------------------------------------------- sheets
 
+  let focusBeforeSheet = null;
   function openSheet(kind) {
+    focusBeforeSheet = root.activeElement;
     state.sheet = kind; ref('sheetWrap').hidden = false; renderSheet();
+    if (kind !== 'stores') {
+      const first = ref('sheet').querySelector('button, a[href]');
+      if (first) setTimeout(() => first.focus({ preventScroll: true }), 50);
+    }
     if (kind === 'stores') {
       const input = ref('sheet').querySelector('input');
       if (storeSearch.query && !storeSearch.results.length) searchStores();
       setTimeout(() => input && !storeSearch.query && input.focus(), 50);
     }
   }
-  function closeSheet() { state.sheet = null; ref('sheetWrap').hidden = true; }
+  function closeSheet() {
+    state.sheet = null; ref('sheetWrap').hidden = true;
+    const back = focusBeforeSheet && root.contains(focusBeforeSheet) && focusBeforeSheet.offsetParent ? focusBeforeSheet : app;
+    back.focus({ preventScroll: true });
+  }
 
   let promptText = '';
   function renderSheet() {
@@ -657,12 +674,17 @@ import {
     // Leave the check alone (and keep #vsdeals, so Deals opens when the page reloads after it).
     if (onCheckPage()) return;
     document.body.appendChild(host);
-    // The automatic check can add its frame just after load: step aside if it does.
-    setTimeout(() => {
+    // The automatic check can add its frame a little after load (later on a slow phone): watch for
+    // ten seconds and step aside if it appears.
+    const watchUntil = Date.now() + 10_000;
+    const watch = setInterval(() => {
+      if (Date.now() > watchUntil) return clearInterval(watch);
       if (!onCheckPage()) return;
+      clearInterval(watch);
+      state.open = false; // stops the reconnect / tab-return refreshes too
       host.remove();
       document.documentElement.style.overflow = '';
-    }, 1500);
+    }, 500);
     const paired = takePairing();
     // Coming in through #vsdeals brings a hidden Deals button back.
     if (location.hash === '#vsdeals') put('launcher', true);

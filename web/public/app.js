@@ -53,7 +53,15 @@ async function load({ manual = false } = {}) {
   const previousPublished = state.snapshot?.publishedAt;
   let changed = true;
   try {
-    const res = await fetch('api/snapshot', { headers: state.etag ? { 'If-None-Match': state.etag } : {}, cache: 'no-cache' });
+    // Never wait forever on a stalled connection: give up after 15 s and say so.
+    const abort = new AbortController();
+    const timer = setTimeout(() => abort.abort(), 15000);
+    let res;
+    try {
+      res = await fetch('api/snapshot', { headers: state.etag ? { 'If-None-Match': state.etag } : {}, cache: 'no-cache', signal: abort.signal });
+    } finally {
+      clearTimeout(timer);
+    }
     if (res.status === 304) {
       state.error = null;
       quietFailures = 0;
@@ -184,7 +192,7 @@ function renderHeader() {
   document.querySelector('.search').hidden = (!snap && !state.loading) || (!!snap && !state.items.length);
   const notice = !!snap && (!!state.error || Date.now() - (snap.savedAt || snap.publishedAt) > 36 * 3600e3);
   // One banner at a time: a stale or failed-update notice (which links to the app too) wins.
-  $('intro').hidden = !introWanted || (!snap && !state.loading) || (!!snap && !state.items.length) || notice ||
+  $('intro').hidden = !introWanted || !snap || !state.items.length || notice ||
     !$('update-banner').hidden;
   if (snap) $('intro-text').innerHTML = hasStock()
     ? '<b>Clearance deals, shared with you.</b> Browse here, or <a href="get/">get the free app</a> to check <i>your</i> store.'
@@ -468,7 +476,8 @@ document.addEventListener('click', async (e) => {
       store.set('staleAck', state.snapshot?.publishedAt ?? null);
       if (introWanted) { introWanted = false; store.set('introDismissed', true); }
       renderHeader();
-      $('q').focus({ preventScroll: true });
+      // Not the search box: on a phone that would open the keyboard over the list.
+      (document.querySelector('#floor-chips .chip') || $('count')).focus({ preventScroll: true });
       return;
     case 'share': return shareDeal(state.items.find((d) => d.id === el.dataset.id));
   }
@@ -638,7 +647,7 @@ if ('serviceWorker' in navigator) {
   let hadWorker = !!navigator.serviceWorker.controller;
   navigator.serviceWorker.register('sw.js').then((reg) => {
     // A tab left open for days still learns about new versions: hourly, and whenever it's looked at again.
-    const check = () => { if (document.visibilityState === 'visible') reg.update().catch(() => {}); };
+    const check = () => { if (reg && document.visibilityState === 'visible') reg.update().catch(() => {}); };
     setInterval(check, 3600e3);
     document.addEventListener('visibilitychange', check);
   }).catch(() => {});

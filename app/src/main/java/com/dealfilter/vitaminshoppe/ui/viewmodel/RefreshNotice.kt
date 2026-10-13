@@ -19,7 +19,7 @@ fun refreshNotice(s: DealUiState, now: Long): RefreshNotice? {
     val recent = updated != null && now - updated < STALE_AFTER_MS
     return when {
         s.needsVerification -> RefreshNotice(
-            RefreshNotice.Kind.VERIFY, "Vitamin Shoppe wants a quick check before it shows new prices", saved, "Verify"
+            RefreshNotice.Kind.VERIFY, "Vitamin Shoppe wants a quick check before it shows new prices", saved, "Check now"
         )
         s.loadError != null && s.loadErrorIsOffline -> RefreshNotice(
             RefreshNotice.Kind.OFFLINE, "You're offline", if (recent) "Deals refresh when you reconnect" else "$saved · they'll refresh when you reconnect", "Retry"

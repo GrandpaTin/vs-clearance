@@ -80,6 +80,13 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
     private var autoFailures = 0
     private var lastFailureAt = 0L
 
+    /** Keeps an on-screen list fresh while the app stays open (e.g. propped up in the store). */
+    private var freshnessJob: Job? = null
+
+    /** Timed retries of a failed shelf check (30 s, then 2 min), like the list's backoff. */
+    private var stockRetryJob: Job? = null
+    private var stockFailures = 0
+
     /** When the user closed the site's check; automatic refreshes leave them alone for a while after. */
     private var verificationDeclinedAt = 0L
 
@@ -144,12 +151,22 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
         }
         // At most once a day; quiet unless there's something new.
         viewModelScope.launch { updater.check() }
+        freshnessJob?.cancel()
+        freshnessJob = viewModelScope.launch {
+            while (true) {
+                delay(5 * 60_000L)
+                val s = _uiState.value
+                if (inForeground && s.loadError == null && isRefreshDue(System.currentTimeMillis())) refreshInternal(auto = true)
+            }
+        }
     }
 
     fun onAppBackground() {
         inForeground = false
         updater.inForeground = false
         autoRetryJob?.cancel()
+        stockRetryJob?.cancel()
+        freshnessJob?.cancel()
     }
 
     internal fun isRefreshDue(now: Long): Boolean {
@@ -318,6 +335,7 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
                 val s = _uiState.value
                 if (s.selectedStore?.storeId == store.storeId) {
                     lastStock = store.storeId to stock
+                    stockFailures = 0
                     persistCache(s.allDeals, s.lastUpdatedMillis ?: System.currentTimeMillis(), store.storeId, stock)
                 }
             } catch (e: CancellationException) {
@@ -329,6 +347,11 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
             } catch (e: Exception) {
                 val detail = e.message?.let { " $it" } ?: ""
                 _uiState.update { it.copy(stockError = "Couldn't check stock at ${store.name}.$detail") }
+                if (inForeground && stockFailures < STOCK_RETRY_DELAYS_MS.size) {
+                    val wait = STOCK_RETRY_DELAYS_MS[stockFailures++]
+                    stockRetryJob?.cancel()
+                    stockRetryJob = viewModelScope.launch { delay(wait); retryStockIfFailed() }
+                }
                 // The fresh deals still go out, just without this store's stock.
                 shareIfOn()
             }
@@ -377,7 +400,9 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
         _uiState.update { it.copy(isWebShareOpen = true) }
         val share = publisher.state.value
         // Only when sharing is on: with it off, opening the sheet must not publish anything.
-        if (share.enabled && share.isConfigured && !share.isPublishing && _uiState.value.allDeals.isNotEmpty()) publishNow()
+        // ...and only when there's something unsent; just looking at the status shouldn't rebuild the site.
+        val unsent = share.pending || share.lastError != null || (share.lastPublishedAt ?: 0L) < (_uiState.value.lastUpdatedMillis ?: 0L)
+        if (share.enabled && share.isConfigured && !share.isPublishing && unsent && _uiState.value.allDeals.isNotEmpty()) publishNow()
     }
 
     fun closeWebShare() = _uiState.update { it.copy(isWebShareOpen = false) }
@@ -702,6 +727,7 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
     companion object {
         /** Waits before the 1st, 2nd and 3rd automatic retry of a failed refresh. */
         private val RETRY_DELAYS_MS = longArrayOf(30_000L, 2 * 60_000L, 10 * 60_000L)
+        private val STOCK_RETRY_DELAYS_MS = longArrayOf(30_000L, 2 * 60_000L)
 
         /** Returns a user-facing problem with the store query, or null when it's searchable. */
         fun validateStoreQuery(query: String): String? = when {
