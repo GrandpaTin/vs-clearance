@@ -7,6 +7,10 @@
   function show(broken) {
     if (booted() || shown === 'broken' || shown === (broken ? 'broken' : 'slow')) return;
     shown = broken ? 'broken' : 'slow';
+    if (!broken) {
+      var l = document.getElementById('list');
+      while (l && l.children.length > 1) l.removeChild(l.lastChild);
+    }
     if (broken) {
       var intro = document.getElementById('intro');
       if (intro) intro.hidden = true;

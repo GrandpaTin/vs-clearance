@@ -202,8 +202,10 @@ fun DealScreenContent(state: DealUiState, viewModel: DealActions, modifier: Modi
 
     // Pull-to-refresh <-> view model loading state. The indicator is also shown for automatic
     // refreshes; only a pull while idle is the user asking (which resets retries and cool-downs).
-    if (pullState.isRefreshing && current.status == LoadStatus.IDLE) {
-        LaunchedEffect(Unit) {
+    // Keyed on the indicator turning on: an automatic refresh ending (indicator still on for a frame
+    // while status is already IDLE) must not count as a pull.
+    LaunchedEffect(pullState.isRefreshing) {
+        if (pullState.isRefreshing && current.status == LoadStatus.IDLE) {
             viewModel.refresh()
             // If a refresh was already finishing, status may never flip; don't spin forever.
             delay(400)
@@ -698,7 +700,7 @@ private fun Banners(state: DealUiState, viewModel: DealActions, now: Long) {
                 text = stockError,
                 container = badges.redContainer,
                 content = badges.onRedContainer,
-                action = "Retry",
+                action = if (state.stockNeedsVerification) "Check now" else "Retry",
                 onAction = viewModel::retryStock
             )
         }

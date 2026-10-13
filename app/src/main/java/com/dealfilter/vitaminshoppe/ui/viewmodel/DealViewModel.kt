@@ -156,7 +156,6 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
         freshnessJob = viewModelScope.launch {
             while (true) {
                 delay(5 * 60_000L)
-                val s = _uiState.value
                 // After a failure isRefreshDue waits out lastFailureAt, so this is at most one try per 5 minutes.
                 if (inForeground && isRefreshDue(System.currentTimeMillis())) refreshInternal(auto = true)
             }
@@ -177,6 +176,8 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
         if (now - verificationDeclinedAt < STALE_AFTER_MS) return false
         // The last attempt failed: try again however recent the list is. A site error waits out at least
         // the first backoff step, so repeated returns can't hammer a struggling site; offline is local.
+        // Waiting on the site's human check: Check now is the way; a quiet try at most every 30 minutes.
+        if (s.loadError != null && s.needsVerification) return now - lastFailureAt >= STALE_AFTER_MS
         if (s.loadError != null) return s.loadErrorIsOffline || now - lastFailureAt >= RETRY_DELAYS_MS[0]
         val updated = s.lastUpdatedMillis ?: return true
         return now - updated >= STALE_AFTER_MS
@@ -271,6 +272,10 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
             }
             try {
                 val fetched = if (auto) withContext(QuietChallenge()) { repository.fetchClearance() } else repository.fetchClearance()
+                val before = _uiState.value.allDeals.size
+                if (before >= 20 && fetched.size < before / 5) {
+                    throw FetchException.BadData("Vitamin Shoppe's list came back nearly empty — keeping your saved deals.")
+                }
                 val now = System.currentTimeMillis()
                 // Show the last known shelf stock right away (new SKUs stay "unknown") so pickup
                 // mode doesn't empty out while the fresh stock check runs.
@@ -303,6 +308,7 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
                 throw e
             } catch (e: FetchException.VerificationRequired) {
                 afterVerification["refresh"] = { refreshInternal(auto = false) }
+                lastFailureAt = System.currentTimeMillis()
                 _uiState.update { it.copy(status = LoadStatus.IDLE, loadError = e.message, needsVerification = true) }
             } catch (e: FetchException) {
                 _uiState.update {
@@ -455,7 +461,8 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
         viewModelScope.launch {
             val error = publisher.publish(
                 s.allDeals.map { it.copy(storeQuantity = null) }, s.lastUpdatedMillis ?: System.currentTimeMillis(),
-                s.selectedStore, stock?.first, stock?.second ?: emptyMap()
+                s.selectedStore, stock?.first, stock?.second ?: emptyMap(),
+                force = announce
             )
             if (!announce) return@launch
             showMessage(

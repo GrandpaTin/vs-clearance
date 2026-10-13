@@ -72,6 +72,9 @@ class WebSession(context: Context) : JsonFetcher {
     private var pageWaiter: CompletableDeferred<PageState>? = null
     private var lastPageError: String? = null
     private var heldOpenByApi = false
+
+    /** The page load under way was started by a background request: a check it finds waits for the user. */
+    private var quietLoad = false
     private var inForeground = true
     private var paused = false
     private var lastPageStartedAt = 0L
@@ -93,6 +96,7 @@ class WebSession(context: Context) : JsonFetcher {
         if (!isOnline()) throw FetchException.Offline()
         var verificationRetries = 0
         var navigationRetries = 0
+        val quiet = coroutineContext[QuietChallenge] != null
         while (true) {
             // Never reload the page underneath someone who is solving a check.
             if (_challengeVisible.value) throw FetchException.VerificationRequired()
@@ -109,6 +113,7 @@ class WebSession(context: Context) : JsonFetcher {
                     // human, the reloaded page shows the challenge and ensureReady() surfaces it.
                     verificationRetries++
                     withContext(Dispatchers.Main) { pageState = PageState.NOT_LOADED }
+                    if (verificationRetries >= 2 && quiet) throw FetchException.VerificationRequired()
                     if (verificationRetries >= 2) {
                         // The page loads fine but the API is still refused: show the page so the
                         // user can complete whatever check DataDome overlays on it, and keep the
@@ -250,6 +255,7 @@ class WebSession(context: Context) : JsonFetcher {
     private suspend fun ensureReady() = readyLock.withLock {
         val quiet = coroutineContext[QuietChallenge]
         withContext(Dispatchers.Main) {
+            quietLoad = quiet != null
             when (pageState) {
                 PageState.READY -> return@withContext
                 PageState.CHALLENGE -> {
@@ -415,7 +421,7 @@ class WebSession(context: Context) : JsonFetcher {
                     "c", "b" -> {
                         pageState = PageState.CHALLENGE
                         pageWaiter?.complete(PageState.CHALLENGE)
-                        _challengeVisible.value = true
+                        if (!quietLoad) _challengeVisible.value = true
                     }
                     else -> {
                         pageState = PageState.READY

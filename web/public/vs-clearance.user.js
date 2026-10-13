@@ -1,23 +1,23 @@
 // ==UserScript==
 // @name         VS Clearance — Vitamin Shoppe deal finder
 // @namespace    vs-clearance
-// @version      3.1.1.48
+// @version      3.1.1.49
 // @description  Every Vitamin Shoppe clearance deal with real cart prices, your store's shelf stock, filters, and an AI review prompt.
 // @match        https://www.vitaminshoppe.com/*
 // @run-at       document-idle
 // @inject-into  page
 // @grant        none
 // @noframes
-// @downloadURL  https://dn.tail59aab8.ts.net:10000/vs-clearance.user.js
-// @updateURL    https://dn.tail59aab8.ts.net:10000/vs-clearance.user.js
-// @homepageURL  https://dn.tail59aab8.ts.net:10000/
+// @downloadURL  https://grandpatin.github.io/vs-clearance/vs-clearance.user.js
+// @updateURL    https://grandpatin.github.io/vs-clearance/vs-clearance.user.js
+// @homepageURL  https://grandpatin.github.io/vs-clearance/
 // ==/UserScript==
 
 (() => {
 'use strict';
 const __VSX_CSS__ = ":host {\n  --navy: #012169; --navy-dark: #001540; --sky: #15BEF0;\n  --bg: #F8FAFC; --surface: #FFFFFF; --surface-2: #F1F5F9; --text: #0F172A; --muted: #64748B;\n  --outline: #CBD5E1; --hairline: #E2E8F0; --price: #047857; --em-bg: #D1FAE5; --em-fg: #065F46;\n  --sky-bg: #E0F2FE; --sky-fg: #0369A1; --amber-bg: #FEF3C7; --amber-fg: #92400E; --red-bg: #FEE2E2; --red-fg: #991B1B;\n  --header: var(--navy); --search: var(--navy-dark); --link: var(--navy);\n}\n@media (prefers-color-scheme: dark) {\n  :host {\n    --bg: #0B1120; --surface: #111827; --surface-2: #1E293B; --text: #F8FAFC; --muted: #94A3B8;\n    --outline: #334155; --hairline: #1F2A3C; --price: #34D399; --em-bg: #064E3B; --em-fg: #A7F3D0;\n    --sky-bg: #0C4A6E; --sky-fg: #BAE6FD; --amber-bg: #451A03; --amber-fg: #FCD34D; --red-bg: #7F1D1D; --red-fg: #FECACA;\n    --header: var(--navy-dark); --search: #1E293B; --link: var(--sky);\n  }\n}\n* { box-sizing: border-box; }\n[hidden] { display: none !important; }\nbutton { font: inherit; color: inherit; cursor: pointer; }\n:focus-visible { outline: 3px solid var(--sky); outline-offset: 2px; }\n.vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }\n.muted { color: var(--muted); margin: 0; }\n.err { color: var(--red-fg); margin: 0; }\n\n.launcher {\n  position: fixed; left: 16px; bottom: calc(16px + env(safe-area-inset-bottom)); z-index: 2147483646;\n  display: flex; align-items: center; gap: 6px; border: 0; border-radius: 999px; padding: 0 20px; min-height: 52px;\n  background: linear-gradient(135deg, #34D399, #047857); color: #fff; font: 700 17px/1 system-ui, -apple-system, sans-serif;\n  box-shadow: 0 8px 24px rgba(0,0,0,.3);\n}\n\n.app {\n  position: fixed; inset: 0; z-index: 2147483647; display: flex; flex-direction: column;\n  background: var(--bg); color: var(--text); font: 16px/1.4 system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif;\n  -webkit-text-size-adjust: 100%;\n}\n.top { background: var(--header); color: #fff; padding: calc(env(safe-area-inset-top) + 10px) 16px 12px; flex: none; }\n.top-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; max-width: 900px; margin: 0 auto; }\n.top-actions { display: flex; }\nh1 { font-size: 1.35rem; margin: 0; }\n.subtitle { margin: 2px 0 0; font-size: .85rem; opacity: .85; }\n.icon-btn { background: transparent; border: 0; border-radius: 50%; width: 44px; height: 44px; display: grid; place-items: center; font-size: 20px; }\n.icon-btn.on-dark { color: #fff; }\n.icon-btn.spin { animation: spin 1s linear infinite; }\n@keyframes spin { to { transform: rotate(360deg); } }\n.search { display: flex; align-items: center; gap: 8px; background: var(--search); border-radius: 12px; padding: 0 12px; margin: 10px auto 0; max-width: 900px; min-height: 50px; }\n.search input { flex: 1; min-width: 0; background: transparent; border: 0; color: #fff; font-size: 16px; padding: 12px 0; }\n.search input::placeholder { color: rgba(255,255,255,.7); }\n.search input:focus { outline: none; }\n\n.scroll { flex: 1; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding-bottom: calc(32px + env(safe-area-inset-bottom)); }\n.scroll > * { max-width: 900px; margin-left: auto; margin-right: auto; }\n.banner { display: flex; align-items: center; gap: 10px; margin: 12px; border-radius: 12px; padding: 8px 8px 8px 14px; }\n.banner span { flex: 1; }\n.banner.warn { background: var(--amber-bg); color: var(--amber-fg); }\n.banner.bad { background: var(--red-bg); color: var(--red-fg); }\n.banner.info { background: var(--sky-bg); color: var(--sky-fg); }\n.text-btn { background: none; border: 0; font-weight: 700; padding: 10px 12px; min-height: 44px; border-radius: 8px; }\n\n.controls { padding: 12px 12px 4px; }\n.segmented { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--outline); border-radius: 999px; overflow: hidden; }\n.segmented button { background: transparent; border: 0; min-height: 44px; font-weight: 600; }\n.segmented button + button { border-left: 1px solid var(--outline); }\n.segmented button[aria-checked=\"true\"] { background: var(--sky-bg); color: var(--sky-fg); }\n.segmented button[aria-checked=\"true\"]::before { content: \"✓ \"; }\n.store-row { display: flex; align-items: center; gap: 10px; width: 100%; margin-top: 8px; padding: 8px 12px; min-height: 52px;\n  background: var(--surface-2); border: 0; border-radius: 12px; text-align: left; }\n.store-text { flex: 1; display: flex; flex-direction: column; }\n.store-text small { color: var(--muted); }\n.chips { display: flex; gap: 8px; overflow-x: auto; padding: 8px 2px 0; scrollbar-width: none; }\n.chips::-webkit-scrollbar { display: none; }\n.chip { flex: none; border: 1px solid var(--outline); background: transparent; border-radius: 8px; min-height: 36px; padding: 6px 14px; font-weight: 600; color: var(--muted); white-space: nowrap; }\n.chip[aria-pressed=\"true\"] { background: var(--sky-bg); color: var(--sky-fg); border-color: transparent; }\n.chip[aria-pressed=\"true\"]::before { content: \"✓ \"; }\n.chip.clear::after { content: \" ✕\"; }\n\n.summary { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 8px; background: var(--bg); padding: 10px 12px 8px 16px; border-bottom: 1px solid var(--hairline); }\n.count { flex: 1 0 auto; font-weight: 700; white-space: nowrap; }\n.tonal-btn { display: inline-flex; align-items: center; gap: 6px; background: var(--sky-bg); color: var(--sky-fg); border: 0; border-radius: 999px; min-height: 40px; padding: 0 12px; font-weight: 700; white-space: nowrap; }\n.tonal-btn.wide { justify-content: center; }\n.sort select { background: transparent; color: var(--link); border: 0; font: inherit; font-weight: 700; min-height: 40px; max-width: 36vw; text-overflow: ellipsis; }\n\n.list { list-style: none; margin: 0 auto; padding: 8px 12px; display: grid; gap: 8px; }\n@media (min-width: 760px) { .list { grid-template-columns: 1fr 1fr; } }\n.card { background: var(--surface); border: 1px solid var(--hairline); border-radius: 16px; display: grid; grid-template-columns: 88px 1fr; gap: 12px; padding: 12px 6px 6px 12px; }\n.thumb { width: 88px; height: 88px; border-radius: 12px; border: 1px solid var(--hairline); background: #fff; display: grid; place-items: center; overflow: hidden; text-decoration: none; font-size: 32px; }\n.thumb.none { background: var(--surface-2); }\n.thumb img { width: 82px; height: 82px; object-fit: contain; padding: 4px; }\n.body { min-width: 0; display: flex; flex-direction: column; gap: 4px; }\n.brandline { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }\n.brand { font-size: .75rem; letter-spacing: .06em; font-weight: 800; color: var(--link); text-transform: uppercase; }\n.title { font-weight: 600; color: var(--text); text-decoration: none; padding-right: 8px;\n  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }\n.prices { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }\n.price { font-size: 1.35rem; font-weight: 800; color: var(--price); }\n.was { color: var(--muted); text-decoration: line-through; }\n.tag { font-size: .75rem; font-weight: 800; border-radius: 6px; padding: 2px 6px; }\n.tag.off, .tag.drop { background: var(--em-bg); color: var(--em-fg); }\n.tag.new { background: var(--sky-bg); color: var(--sky-fg); }\n.note { font-size: .85rem; color: var(--muted); }\n.pills { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }\n.pill { background: var(--surface-2); color: var(--muted); font-size: .8rem; border-radius: 6px; padding: 2px 6px; }\n.rating { font-size: .85rem; color: var(--muted); }\n.foot { display: flex; align-items: center; min-height: 44px; }\n.stock { flex: 1; display: flex; align-items: center; gap: 6px; font-size: .9rem; font-weight: 500; }\n.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--outline); flex: none; }\n.dot.good { background: var(--em-fg); }\n.dot.bad { background: var(--red-fg); }\n.foot .icon-btn { color: var(--muted); }\n\n.status { text-align: center; padding: 40px 28px; display: grid; justify-items: center; gap: 8px; }\n.badge { width: 88px; height: 88px; border-radius: 50%; display: grid; place-items: center; background: var(--sky-bg); font-size: 40px; }\n.status h2 { margin: 8px 0 0; font-size: 1.15rem; }\n.status p { margin: 0; color: var(--muted); max-width: 460px; }\n.actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 8px; }\n.primary-btn { background: var(--navy); color: #fff; border: 0; border-radius: 999px; min-height: 44px; padding: 0 20px; font-weight: 700; }\n@media (prefers-color-scheme: dark) { .primary-btn { background: var(--sky); color: var(--navy-dark); } }\na.primary-btn { display: inline-flex; align-items: center; text-decoration: none; }\n.outline-btn { background: transparent; border: 1px solid var(--outline); border-radius: 999px; min-height: 44px; padding: 0 18px; font-weight: 700; }\n.skeleton { height: 140px; border-radius: 16px; background: linear-gradient(90deg, var(--surface-2), var(--surface), var(--surface-2)); background-size: 200% 100%; animation: shimmer 1.4s infinite; }\n@keyframes shimmer { to { background-position: -200% 0; } }\n@media (prefers-reduced-motion: reduce) { .skeleton, .icon-btn.spin { animation: none; } }\n\n.sheet-wrap { position: absolute; inset: 0; background: rgba(0,0,0,.5); display: flex; align-items: flex-end; justify-content: center; z-index: 5; }\n.sheet { background: var(--surface); color: var(--text); width: 100%; max-width: 720px; max-height: 88%; overflow-y: auto; overscroll-behavior: contain;\n  border-radius: 20px 20px 0 0; padding: 20px 16px calc(16px + env(safe-area-inset-bottom)); display: grid; gap: 12px; }\n@media (min-width: 760px) { .sheet-wrap { align-items: center; } .sheet { border-radius: 20px; } }\n.sheet h2 { margin: 0; font-size: 1.25rem; }\n.store-form { display: flex; gap: 8px; }\n.store-form input { flex: 1; min-width: 0; font-size: 16px; padding: 12px; border: 1px solid var(--outline); border-radius: 12px; background: var(--surface); color: var(--text); }\n.stores { display: grid; gap: 8px; }\n.store { display: flex; gap: 8px; text-align: left; background: var(--surface-2); border: 2px solid transparent; border-radius: 12px; padding: 12px; }\n.store.selected { background: var(--sky-bg); border-color: var(--sky-fg); }\n.store[aria-disabled=\"true\"] { opacity: .7; }\n.store-main { flex: 1; display: flex; flex-direction: column; }\n.store-main span, .store-main small { color: var(--muted); }\n.store-main small.err { color: var(--red-fg); }\n.dist { color: var(--link); font-weight: 700; white-space: nowrap; }\n.scope { background: var(--sky-bg); color: var(--sky-fg); border-radius: 12px; padding: 12px; }\n.scope b { display: block; }\n.sheet-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }\n.sheet-actions button { min-height: 48px; }\ndetails summary { cursor: pointer; font-weight: 700; min-height: 44px; display: flex; align-items: center; }\npre { white-space: pre-wrap; background: var(--surface-2); border-radius: 12px; padding: 12px; max-height: 300px; overflow: auto; font-size: 12px; margin: 0; }\n.close { justify-self: end; }\n.toast { position: absolute; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom)); transform: translateX(-50%); background: #1E293B; color: #fff; padding: 12px 18px; border-radius: 12px; max-width: calc(100% - 32px); z-index: 6; }\n\n.share-line { display: flex; align-items: center; gap: 4px; margin: 0 12px 12px; padding: 4px 4px 4px 14px; border-radius: 12px; background: var(--surface-2); color: var(--muted); font-size: .9rem; }\n.share-line span { flex: 1; }\n.share-line a { color: var(--link); text-decoration: none; }\n\n.foot-note { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; column-gap: 14px; color: var(--muted); font-size: .8rem; padding: 4px 16px 24px; }\n.link-btn { background: none; border: 0; color: inherit; text-decoration: underline; font: inherit; padding: 8px 4px; min-height: 40px; cursor: pointer; }\n.app:focus { outline: none; }\n";
-const __VSX_VERSION__ = "3.1.1.48";
-const __VSX_HOME__ = "https://dn.tail59aab8.ts.net:10000/";
+const __VSX_VERSION__ = "3.1.1.49";
+const __VSX_HOME__ = "https://grandpatin.github.io/vs-clearance/";
 // Pure deal logic shared by the web app and its tests. Mirrors the Android app's
 // DealItem / DealFilters / AiPrompt so both show identical prices and orderings.
 
@@ -167,12 +167,20 @@ function unitMatches(unit, t) {
   return squashed.length >= 5 && t.words.some((w) => w.includes(squashed));
 }
 
+// Each item's searchable text is prepared once, not on every keystroke for every filter count.
+const prepared = new WeakMap();
+function preparedFor(d) {
+  let t = prepared.get(d);
+  if (!t) { t = prepare([d.brand, d.title, d.category, d.form].filter(Boolean).join(' ')); prepared.set(d, t); }
+  return t;
+}
+
 function matcher(query) {
   const units = searchUnits(query);
   const whole = units.join(' ');
   return (d) => {
     if (!units.length) return true;
-    const t = prepare([d.brand, d.title, d.category, d.form].filter(Boolean).join(' '));
+    const t = preparedFor(d);
     return unitMatches(whole, t) || units.every((u) => unitMatches(u, t));
   };
 }
@@ -236,6 +244,8 @@ function applyFilters(items, c) {
     (c.mode === 'pickup' ? (d.qty || 0) > 0 : !c.inStockOnly || !d.oos) &&
     match(d)
   );
+  // Counts (chips, "anything at all?") don't need the order.
+  if (c.unsorted) return out;
   const sorted = sortDeals(out, c.sort);
   if (!normalize(c.query)) return sorted;
   // Stable: within each group the chosen sort still applies.
@@ -497,12 +507,12 @@ function todaysHours(lines, date = new Date()) {
       throw new Error(navigator.onLine === false ? "You're offline." : "Couldn't reach vitaminshoppe.com.");
     }
     if (res.status === 403) throw new Blocked('Vitamin Shoppe wants to confirm a person is browsing.');
-    if (!res.ok && res.status !== 404) throw new Error(`Vitamin Shoppe answered ${res.status}.`);
+    if (!res.ok && res.status !== 404) throw new Error(httpTrouble(res.status));
     let data;
     const text = await res.text().catch(() => '');
     try { data = JSON.parse(text); } catch {
       if (res.status === 404) {
-        if (url.includes('/search/product/search')) throw new Error('Vitamin Shoppe sent an empty clearance list.');
+        if (url.includes('/search/product/search')) throw new Error("Vitamin Shoppe didn't send the deals list.");
         if (url.includes('get-stores-with-inv')) throw new Error('Store search is unavailable right now. Try again in a minute.');
         throw new Error('Vitamin Shoppe didn\'t answer as expected.');
       }
@@ -517,7 +527,7 @@ function todaysHours(lines, date = new Date()) {
         if (Array.isArray(data?.response?.products)) throw new Error('Vitamin Shoppe sent an empty clearance list.');
         throw new SiteChanged("Vitamin Shoppe's clearance search changed.");
       }
-      throw new Error(`Vitamin Shoppe answered ${res.status}.`);
+      throw new Error(httpTrouble(res.status));
     }
     return data;
   }
@@ -618,6 +628,10 @@ function todaysHours(lines, date = new Date()) {
   // Gentle automatic retries while the overlay sits open on an error: 15 min, 30, 60, then every 2 h.
   let errorRetries = 0, nextErrorRetry = 0, stockRetries = 0, nextStockRetry = 0;
 
+  function httpTrouble(status) {
+    return status >= 500 ? 'Vitamin Shoppe had a server hiccup.' : `Vitamin Shoppe turned the request down (error ${status}).`;
+  }
+
   let stockRun = 0;
   /** Shelf stock for the chosen store. With onlyMissing, fresh stock is kept and only new items are asked about. */
   async function loadStock({ onlyMissing = false } = {}) {
@@ -662,8 +676,8 @@ function todaysHours(lines, date = new Date()) {
         // the title already says "Quick check needed"; the body says what for and what to do
         state.stockError = state.stockBlocked
           ? `Vitamin Shoppe wants to confirm a person is browsing before showing stock at ${store.name}. Tap Reload page, complete any check, and Deals reopens.`
-          : (reached ? `Shelf stock is missing for ${missing} of ${total} items. ` : '') +
-            `${e.message.replace(/\.?$/, '.')} ${connection ? 'Check your connection and try again.' : 'Try again in a minute.'}`;
+          : (reached ? `Couldn't check ${missing} of ${total} items at ${store.name}. ` : '') +
+            `${e.message.replace(/\.?$/, '.')} ${connection ? 'Check your connection and try again.' : 'Tap Retry, or it will try again later.'}`;
       }
     } finally {
       if (run === stockRun) { state.stockLoading = false; render(); }
@@ -727,10 +741,15 @@ function todaysHours(lines, date = new Date()) {
       storeSearch.searching = false; renderSheet();
     }
     // Say how many were found and put focus on the first, for keyboard and screen-reader users.
-    if (!storeSearch.message && storeSearch.results.length && state.sheet === 'stores') {
-      toast(`${storeSearch.results.length} store${storeSearch.results.length === 1 ? '' : 's'} found`);
-      const first = ref('sheet').querySelector('.store');
-      if (first) first.focus({ preventScroll: true });
+    if (state.sheet === 'stores') {
+      if (!storeSearch.message && storeSearch.results.length) {
+        toast(`${storeSearch.results.length} store${storeSearch.results.length === 1 ? '' : 's'} found`);
+        const first = ref('sheet').querySelector('.store');
+        if (first) first.focus({ preventScroll: true });
+      } else {
+        const input = ref('sheet').querySelector('form input');
+        if (input) input.focus({ preventScroll: true });
+      }
     }
   }
 
@@ -759,6 +778,7 @@ function todaysHours(lines, date = new Date()) {
         <div data-ref="banner"></div>
         <section class="controls" data-ref="controls"></section>
         <div class="summary" data-ref="summary"></div>
+        <span class="vh" data-ref="live" role="status" aria-live="polite"></span>
         <ul class="list" data-ref="list"></ul>
         <div class="status" data-ref="status" hidden></div>
         <div class="share-line" data-ref="shareLine" hidden></div>
@@ -780,7 +800,10 @@ function todaysHours(lines, date = new Date()) {
     if (location.hash !== '#vsdeals') history.replaceState(history.state, '', location.pathname + location.search + '#vsdeals');
     document.documentElement.style.overflow = 'hidden';
     render();
-    if (listIsOld()) loadDeals(); else if (stockIsDue()) loadStock();
+    // A refusal from before (the user may just have completed the site's check) is retried on open.
+    if (state.blocked || listIsOld()) loadDeals();
+    else if (state.stockBlocked || stockIsDue()) loadStock({ onlyMissing: !state.stockBlocked && hasStock() && !!state.stock.partial });
+    if (storeSearch.blocked && state.sheet === 'stores') searchStores();
     // Esc works straight away (focus starts on the page underneath).
     app.focus({ preventScroll: true });
   }
@@ -846,15 +869,24 @@ function todaysHours(lines, date = new Date()) {
     return ago === 'just now' ? 'showing the list you just loaded' : `showing the list saved ${ago}`;
   };
 
+  /** Only touches the list when its content changed, so a no-change refresh keeps focus and scroll. */
+  function setList(list, html) {
+    if (list._html === html) return;
+    list.innerHTML = html;
+    list._html = html;
+  }
   function render() {
     const a = root.activeElement;
     const act = a && a.dataset ? a.dataset.act : null, v = a && a.dataset ? a.dataset.v : undefined;
+    const card = a && a.dataset ? a.dataset.card : undefined;
     renderNow();
-    // Rebuilt buttons drop keyboard focus: put it back on the same one (or the app) so Tab doesn't start over.
-    if (act && state.open && !(root.activeElement && root.activeElement.isConnected)) {
-      const same = v == null ? null : [...root.querySelectorAll(`[data-act="${act}"]`)].find((el) => el.dataset.v === v);
-      const t = same || root.querySelector(`[data-act="${act}"]`);
-      (t && t.offsetParent ? t : app).focus({ preventScroll: true });
+    // Rebuilt buttons and links drop keyboard focus: put it back on the same one (or the app) so
+    // Tab doesn't start over or wander onto the page underneath.
+    if ((act || card != null) && state.open && !(root.activeElement && root.activeElement.isConnected)) {
+      const same = act
+        ? (v == null ? null : [...root.querySelectorAll(`[data-act="${act}"]`)].find((el) => el.dataset.v === v)) || root.querySelector(`[data-act="${act}"]`)
+        : [...root.querySelectorAll('[data-card]')].find((el) => el.dataset.card === card);
+      (same && same.offsetParent ? same : app).focus({ preventScroll: true });
     }
   }
   function renderNow() {
@@ -872,7 +904,7 @@ function todaysHours(lines, date = new Date()) {
     const have = state.items.length > 0;
     ref('controls').hidden = !have; ref('summary').hidden = !have;
     if (!have) {
-      list.innerHTML = state.loading ? '<li class="skeleton"></li>'.repeat(4) : '';
+      setList(list, state.loading ? '<li class="skeleton"></li>'.repeat(4) : '');
       status.hidden = state.loading;
       status.innerHTML = state.loading ? '' : statusHtml(state.blocked ? '🛡️' : '⚠️',
         state.blocked ? 'Quick check needed' : "Couldn't load deals", state.blocked ? 'Vitamin Shoppe wants to confirm a person is browsing. Tap Reload page, complete any check, and Deals reopens.' : esc(state.error || "Vitamin Shoppe didn't send any deals."),
@@ -883,31 +915,33 @@ function todaysHours(lines, date = new Date()) {
     renderControls();
     const deals = visible();
     const total = state.items.length;
-    ref('summary').innerHTML = `<span class="count" aria-label="Showing ${deals.length} of ${total} deals">${deals.length === total ? `${total} deals` : `${deals.length} of ${total}`}</span>
+    const said = `Showing ${deals.length} of ${total} deals`;
+    if (ref('live').textContent !== said) ref('live').textContent = said;
+    ref('summary').innerHTML = `<span class="count" aria-hidden="true">${deals.length === total ? `${total} deals` : `${deals.length} of ${total}`}</span>
       ${deals.length ? `<button class="tonal-btn" data-act="ai">🧠 Ask AI (${Math.min(deals.length, AI_MAX_ITEMS)})</button>` : ''}
       <label class="sort"><span class="vh">Sort by</span><select data-ref="sort">${SORTS.map((o) => `<option value="${o.id}"${o.id === state.sort ? ' selected' : ''}>⇅ ${esc(o.short)}</option>`).join('')}</select></label>`;
     if (state.mode === 'pickup' && state.stockLoading && !deals.length) {
-      list.innerHTML = ''; status.hidden = false;
+      setList(list, ''); status.hidden = false;
       status.innerHTML = statusHtml('🏬', 'Checking shelves…', `Looking up stock at ${esc(state.store.name)}.`);
       return;
     }
     if (state.mode === 'pickup' && state.store && !hasStock() && !state.stockLoading) {
-      list.innerHTML = ''; status.hidden = false; ref('summary').hidden = true;
+      setList(list, ''); status.hidden = false; ref('summary').hidden = true;
       status.innerHTML = statusHtml('🏬', state.stockBlocked ? 'Quick check needed' : "Couldn't check shelves",
         esc(state.stockError || `We couldn't get stock for ${state.store.name}.`),
         [[state.stockBlocked ? 'Reload page' : 'Try again', state.stockBlocked ? 'reload-page' : 'retry-stock', true], ['Show ship-to-home', 'ship']]);
       return;
     }
     if (!deals.length && state.mode === 'pickup' && state.stockError && hasStock()) {
-      list.innerHTML = ''; status.hidden = false;
+      setList(list, ''); status.hidden = false;
       status.innerHTML = statusHtml('🏬', "Couldn't re-check shelves",
         `Nothing matched in the stock checked ${relativeTime(state.stock.at)} — it may have changed since.`,
         [[state.stockBlocked ? 'Reload page' : 'Try again', state.stockBlocked ? 'reload-page' : 'retry-stock', true], ['Show ship-to-home', 'ship']]);
       return;
     }
-    if (!deals.length) { list.innerHTML = ''; status.hidden = false; status.innerHTML = noMatchesHtml(); return; }
+    if (!deals.length) { setList(list, ''); status.hidden = false; status.innerHTML = noMatchesHtml(); return; }
     status.hidden = true;
-    list.innerHTML = deals.map(cardHtml).join('');
+    setList(list, deals.map(cardHtml).join(''));
   }
 
   let lastBannerHtml = null;
@@ -926,7 +960,8 @@ function todaysHours(lines, date = new Date()) {
       html = `<div class="banner info"><span>Shelf stock at ${esc(state.store?.name || 'your store')} ${state.stockBlocked ? 'needs a quick check' : "couldn't be checked"}.</span><button class="text-btn" data-act="${state.stockBlocked ? 'reload-page' : 'retry-stock'}">${state.stockBlocked ? 'Reload page' : 'Retry'}</button></div>`;
     } else if (state.stockError && !(state.mode === 'pickup' && (!hasStock() || !visible().length))) {
       // (In pickup with nothing to show, the full-page panel below says it instead.)
-      const age = hasStock() ? ` · showing stock checked ${relativeTime(state.stock.at)}` : '';
+      // The age only matters when the counts on screen are from an earlier check.
+      const age = hasStock() && Date.now() - state.stock.at > 10 * 60_000 ? ` · showing stock checked ${relativeTime(state.stock.at)}` : '';
       html = `<div class="banner bad"><span>${esc(state.stockError.replace(/\.$/, ''))}${age}.</span><button class="text-btn" data-act="${state.stockBlocked ? 'reload-page' : 'retry-stock'}">${state.stockBlocked ? 'Reload page' : 'Retry'}</button></div>`;
     } else if (hasStock() && !state.stockLoading && Date.now() - (state.stock.at || 0) > 6 * 3600e3) {
       // 7. shelf stock's age said once, not on every card
@@ -948,8 +983,8 @@ function todaysHours(lines, date = new Date()) {
     const n = changeIds().size;
     ref('controls').innerHTML = `
       <div class="segmented" role="radiogroup" aria-label="Fulfillment">
-        <button role="radio" data-act="mode" data-v="ship" aria-checked="${state.mode === 'ship'}">Ship</button>
-        <button role="radio" data-act="mode" data-v="pickup" aria-checked="${state.mode === 'pickup'}">Pick up</button>
+        <button role="radio" data-act="mode" data-v="ship" aria-checked="${state.mode === 'ship'}" tabindex="${state.mode === 'ship' ? 0 : -1}">Ship</button>
+        <button role="radio" data-act="mode" data-v="pickup" aria-checked="${state.mode === 'pickup'}" tabindex="${state.mode === 'pickup' ? 0 : -1}">Pick up</button>
       </div>
       <button class="store-row" data-act="stores">
         <span aria-hidden="true">📍</span>
@@ -979,8 +1014,8 @@ function todaysHours(lines, date = new Date()) {
       <a class="thumb${d.img ? '' : ' none'}" href="${esc(d.url)}" tabindex="-1" aria-hidden="true">${d.img ? `<img src="${esc(d.img)}" alt="" loading="lazy">` : '📦'}</a>
       <div class="body">
         <div class="brandline"><span class="brand">${esc(d.brand || 'Vitamin Shoppe')}</span>${isNew ? '<span class="tag new">NEW</span>' : ''}${was != null ? '<span class="tag drop">PRICE DROP</span>' : ''}</div>
-        <a class="title" href="${esc(d.url)}">${esc(d.title)}</a>
-        <div class="prices"><span class="price">${est != null ? '≈' : ''}${money(bestPrice(d))}</span>${off ? `<span class="was">${money(d.list)}</span><span class="tag off">−${off}%</span>` : ''}</div>
+        <a class="title" data-card="${esc(d.id)}" href="${esc(d.url)}">${esc(d.title)}</a>
+        <div class="prices"><span class="price">${est != null ? '≈' : ''}${money(bestPrice(d))}</span>${off ? `<span class="vh">was </span><span class="was">${money(d.list)}</span><span class="tag off" aria-label="${off}% off">−${off}%</span>` : ''}</div>
         ${was != null ? `<span class="note">Down from <s>${money(was)}</s> since your last check</span>` : ''}
         ${est != null ? `<span class="note">🛒 Extra ${d.cart}% off in cart (lists ${money(d.site)})</span>` : ''}
         ${adp ? `<span class="note">${money(adp)} with Auto Delivery</span>` : ''}
@@ -1023,7 +1058,11 @@ function todaysHours(lines, date = new Date()) {
     if (kind === 'stores') {
       const input = ref('sheet').querySelector('input');
       if (storeSearch.query && !storeSearch.results.length) searchStores();
-      setTimeout(() => input && !storeSearch.query && input.focus(), 50);
+      // A saved search shows its results: start at the heading rather than on a store hidden behind it.
+      setTimeout(() => {
+        if (input && !storeSearch.query) input.focus();
+        else { const h = ref('sheet').querySelector('h2'); if (h) h.focus({ preventScroll: true }); }
+      }, 50);
     }
   }
   function closeSheet() {
@@ -1047,10 +1086,10 @@ function todaysHours(lines, date = new Date()) {
             ${today ? `<small class="${why ? 'err' : ''}">${esc(today)}</small>` : ''}</span>
           <span class="dist">${s.dist >= 0 ? (s.dist < 10 ? s.dist.toFixed(1) : Math.round(s.dist)) + ' mi' : ''}</span></button>`;
       }).join('');
-      sheet.innerHTML = `<h2 id="vsx-sheet-title">Choose your store</h2><p class="muted">We'll check which clearance items are on the shelf there.</p>
+      sheet.innerHTML = `<h2 id="vsx-sheet-title" tabindex="-1">Choose your store</h2><p class="muted">We'll check which clearance items are on the shelf there.</p>
         <form data-ref="storeForm" class="store-form"><input type="search" inputmode="search" placeholder="ZIP code or City, ST" value="${esc(storeSearch.query)}" aria-label="ZIP code or city">
           <button class="primary-btn" type="submit"${storeSearch.searching ? ' disabled aria-busy="true"' : ''}>${storeSearch.searching ? 'Searching…' : 'Search'}</button></form>
-        ${storeSearch.message ? `<p class="err">${esc(storeSearch.message)}${storeSearch.blocked ? ' Reload the page, complete any check, then search again.' : ''}</p>${storeSearch.blocked ? '<button class="outline-btn" data-act="reload-page">Reload page</button>' : ''}` : ''}
+        ${storeSearch.message ? `<p class="err" role="alert">${esc(storeSearch.message)}${storeSearch.blocked ? ' Reload the page, complete any check, then search again.' : ''}</p>${storeSearch.blocked ? '<button class="outline-btn" data-act="reload-page">Reload page</button>' : ''}` : ''}
         <div class="stores">${rows}</div>
         ${state.store ? '<button class="outline-btn" data-act="clear-store">Clear store · ship to home only</button>' : ''}
         <button class="text-btn close" data-act="close-sheet">Close</button>`;
@@ -1180,6 +1219,16 @@ function todaysHours(lines, date = new Date()) {
   }
   root.addEventListener('keydown', onEscape);
   root.addEventListener('keydown', (e) => {
+    const t = e.composedPath ? e.composedPath()[0] : e.target;
+    if (!t || !t.dataset || t.dataset.act !== 'mode' || !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
+    e.preventDefault();
+    const other = t.dataset.v === 'ship' ? 'pickup' : 'ship';
+    const btn = root.querySelector(`[data-act="mode"][data-v="${other}"]`);
+    if (!btn) return;
+    btn.click();
+    setTimeout(() => { const now = root.querySelector(`[data-act="mode"][data-v="${other}"]`); if (now && !state.sheet) now.focus(); }, 0);
+  });
+  root.addEventListener('keydown', (e) => {
     if (e.key !== 'Tab' || !state.open) return;
     const box = state.sheet ? ref('sheet') : app;
     const items = [...box.querySelectorAll('a[href], button:not([disabled]), input, select, textarea, [tabindex]:not([tabindex="-1"])')]
@@ -1192,7 +1241,11 @@ function todaysHours(lines, date = new Date()) {
   });
   // After a click re-renders the clicked button (or a sheet closes), focus drops to the page,
   // outside the overlay: catch Esc there too.
-  document.addEventListener('keydown', (e) => { if (!root.activeElement) onEscape(e); }, true);
+  document.addEventListener('keydown', (e) => {
+    if (root.activeElement || !state.open) return;
+    if (e.key === 'Tab') { e.preventDefault(); app.focus({ preventScroll: true }); return; } // back inside, not onto the page
+    onEscape(e);
+  }, true);
   launcher.addEventListener('click', openApp);
 
   /** #vsdeals-share=<base64url {"url","token"}> from the owner's /setup page pairs this browser. */
@@ -1234,9 +1287,30 @@ function todaysHours(lines, date = new Date()) {
       host.remove();
       document.documentElement.style.overflow = '';
     } else if (!check && !host.isConnected) {
-      document.body.appendChild(host);
-      if (reopenAfterCheck) { reopenAfterCheck = false; openApp(); }
+      attach(pendingPaired);
     }
+  }
+  let restored = false, pendingPaired = null;
+  /** Puts Deals on the page; the first time, also restores where the user was (search, scroll, sheet). */
+  function attach(paired) {
+    document.body.appendChild(host);
+    const wantOpen = reopenAfterCheck || !!paired || location.hash === '#vsdeals';
+    reopenAfterCheck = false; pendingPaired = null;
+    if (restored) { if (wantOpen) openApp(); return; }
+    restored = true;
+    // Back from a product page: the same search and scroll position (only read on the Deals page,
+    // so a product page that also runs this script doesn't use it up).
+    let view = null;
+    if (location.hash === '#vsdeals') {
+      try { view = JSON.parse(sessionStorage.getItem('vsx.view') || 'null'); sessionStorage.removeItem('vsx.view'); } catch { /* private mode */ }
+      if (view && Date.now() - view.at < 30 * 60_000) { state.query = view.q || ''; ref('q').value = state.query; } else view = null;
+    }
+    if (wantOpen) openApp();
+    if (view && state.open && view.top) requestAnimationFrame(() => { ref('scroll').scrollTop = view.top; });
+    let reopen = null;
+    try { reopen = sessionStorage.getItem('vsx.reopen'); sessionStorage.removeItem('vsx.reopen'); } catch { /* private mode */ }
+    if (reopen === 'stores' && state.open) openSheet('stores');
+    if (paired && state.raw.length && state.savedAt && Date.now() - state.savedAt <= 10 * 60_000) publish();
   }
   function mount() {
     if (!document.body) return setTimeout(mount, 50);
@@ -1252,20 +1326,8 @@ function todaysHours(lines, date = new Date()) {
     if (location.hash === '#vsdeals') put('launcher', true);
     launcher.hidden = !get('launcher', true);
     // Leave a check alone; Deals mounts (and opens, if asked) once it's done.
-    if (onCheckPage()) { reopenAfterCheck = !!paired || location.hash === '#vsdeals'; return; }
-    document.body.appendChild(host);
-    // Back from a product page: the same search and scroll position as before.
-    let view = null;
-    try { view = JSON.parse(sessionStorage.getItem('vsx.view') || 'null'); sessionStorage.removeItem('vsx.view'); } catch { /* private mode */ }
-    if (view && Date.now() - view.at < 30 * 60_000 && location.hash === '#vsdeals') {
-      state.query = view.q || ''; ref('q').value = state.query;
-    }
-    if (paired || location.hash === '#vsdeals') openApp();
-    if (view && state.open && view.top) requestAnimationFrame(() => { ref('scroll').scrollTop = view.top; });
-    let reopen = null;
-    try { reopen = sessionStorage.getItem('vsx.reopen'); sessionStorage.removeItem('vsx.reopen'); } catch { /* private mode */ }
-    if (reopen === 'stores' && state.open) openSheet('stores');
-    if (paired && state.raw.length && state.savedAt && Date.now() - state.savedAt <= 10 * 60_000) publish();
+    if (onCheckPage()) { reopenAfterCheck = !!paired || location.hash === '#vsdeals'; pendingPaired = paired; return; }
+    attach(paired);
   }
   mount();
   window.addEventListener('hashchange', () => { if (location.hash === '#vsdeals' && !state.open) openApp(); });

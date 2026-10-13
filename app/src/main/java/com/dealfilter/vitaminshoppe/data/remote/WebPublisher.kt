@@ -168,12 +168,13 @@ class WebPublisher(
         savedAt: Long,
         store: StoreLocation?,
         stockStoreId: String?,
-        stock: Map<String, Int>
+        stock: Map<String, Int>,
+        force: Boolean = false
     ): String? = lock.withLock {
         val s = _state.value
         if (!s.isConfigured) return@withLock "Sharing isn't set up yet."
         val signature = listOf(s.gitHubRepo, s.serverUrl, savedAt, store?.storeId, stockStoreId, stock.hashCode(), items.size).hashCode()
-        if (signature == lastPublishedSignature && !s.pending && s.lastError == null) return@withLock null
+        if (!force && signature == lastPublishedSignature && !s.pending && s.lastError == null) return@withLock null
         _state.update { it.copy(isPublishing = true) }
         val outcome = withContext(Dispatchers.IO) {
             val repo = gitHubRepo(s.gitHubRepo)

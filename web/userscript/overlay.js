@@ -29,12 +29,12 @@ import {
       throw new Error(navigator.onLine === false ? "You're offline." : "Couldn't reach vitaminshoppe.com.");
     }
     if (res.status === 403) throw new Blocked('Vitamin Shoppe wants to confirm a person is browsing.');
-    if (!res.ok && res.status !== 404) throw new Error(`Vitamin Shoppe answered ${res.status}.`);
+    if (!res.ok && res.status !== 404) throw new Error(httpTrouble(res.status));
     let data;
     const text = await res.text().catch(() => '');
     try { data = JSON.parse(text); } catch {
       if (res.status === 404) {
-        if (url.includes('/search/product/search')) throw new Error('Vitamin Shoppe sent an empty clearance list.');
+        if (url.includes('/search/product/search')) throw new Error("Vitamin Shoppe didn't send the deals list.");
         if (url.includes('get-stores-with-inv')) throw new Error('Store search is unavailable right now. Try again in a minute.');
         throw new Error('Vitamin Shoppe didn\'t answer as expected.');
       }
@@ -49,7 +49,7 @@ import {
         if (Array.isArray(data?.response?.products)) throw new Error('Vitamin Shoppe sent an empty clearance list.');
         throw new SiteChanged("Vitamin Shoppe's clearance search changed.");
       }
-      throw new Error(`Vitamin Shoppe answered ${res.status}.`);
+      throw new Error(httpTrouble(res.status));
     }
     return data;
   }
@@ -150,6 +150,10 @@ import {
   // Gentle automatic retries while the overlay sits open on an error: 15 min, 30, 60, then every 2 h.
   let errorRetries = 0, nextErrorRetry = 0, stockRetries = 0, nextStockRetry = 0;
 
+  function httpTrouble(status) {
+    return status >= 500 ? 'Vitamin Shoppe had a server hiccup.' : `Vitamin Shoppe turned the request down (error ${status}).`;
+  }
+
   let stockRun = 0;
   /** Shelf stock for the chosen store. With onlyMissing, fresh stock is kept and only new items are asked about. */
   async function loadStock({ onlyMissing = false } = {}) {
@@ -194,8 +198,8 @@ import {
         // the title already says "Quick check needed"; the body says what for and what to do
         state.stockError = state.stockBlocked
           ? `Vitamin Shoppe wants to confirm a person is browsing before showing stock at ${store.name}. Tap Reload page, complete any check, and Deals reopens.`
-          : (reached ? `Shelf stock is missing for ${missing} of ${total} items. ` : '') +
-            `${e.message.replace(/\.?$/, '.')} ${connection ? 'Check your connection and try again.' : 'Try again in a minute.'}`;
+          : (reached ? `Couldn't check ${missing} of ${total} items at ${store.name}. ` : '') +
+            `${e.message.replace(/\.?$/, '.')} ${connection ? 'Check your connection and try again.' : 'Tap Retry, or it will try again later.'}`;
       }
     } finally {
       if (run === stockRun) { state.stockLoading = false; render(); }
@@ -259,10 +263,15 @@ import {
       storeSearch.searching = false; renderSheet();
     }
     // Say how many were found and put focus on the first, for keyboard and screen-reader users.
-    if (!storeSearch.message && storeSearch.results.length && state.sheet === 'stores') {
-      toast(`${storeSearch.results.length} store${storeSearch.results.length === 1 ? '' : 's'} found`);
-      const first = ref('sheet').querySelector('.store');
-      if (first) first.focus({ preventScroll: true });
+    if (state.sheet === 'stores') {
+      if (!storeSearch.message && storeSearch.results.length) {
+        toast(`${storeSearch.results.length} store${storeSearch.results.length === 1 ? '' : 's'} found`);
+        const first = ref('sheet').querySelector('.store');
+        if (first) first.focus({ preventScroll: true });
+      } else {
+        const input = ref('sheet').querySelector('form input');
+        if (input) input.focus({ preventScroll: true });
+      }
     }
   }
 
@@ -291,6 +300,7 @@ import {
         <div data-ref="banner"></div>
         <section class="controls" data-ref="controls"></section>
         <div class="summary" data-ref="summary"></div>
+        <span class="vh" data-ref="live" role="status" aria-live="polite"></span>
         <ul class="list" data-ref="list"></ul>
         <div class="status" data-ref="status" hidden></div>
         <div class="share-line" data-ref="shareLine" hidden></div>
@@ -312,7 +322,10 @@ import {
     if (location.hash !== '#vsdeals') history.replaceState(history.state, '', location.pathname + location.search + '#vsdeals');
     document.documentElement.style.overflow = 'hidden';
     render();
-    if (listIsOld()) loadDeals(); else if (stockIsDue()) loadStock();
+    // A refusal from before (the user may just have completed the site's check) is retried on open.
+    if (state.blocked || listIsOld()) loadDeals();
+    else if (state.stockBlocked || stockIsDue()) loadStock({ onlyMissing: !state.stockBlocked && hasStock() && !!state.stock.partial });
+    if (storeSearch.blocked && state.sheet === 'stores') searchStores();
     // Esc works straight away (focus starts on the page underneath).
     app.focus({ preventScroll: true });
   }
@@ -378,15 +391,24 @@ import {
     return ago === 'just now' ? 'showing the list you just loaded' : `showing the list saved ${ago}`;
   };
 
+  /** Only touches the list when its content changed, so a no-change refresh keeps focus and scroll. */
+  function setList(list, html) {
+    if (list._html === html) return;
+    list.innerHTML = html;
+    list._html = html;
+  }
   function render() {
     const a = root.activeElement;
     const act = a && a.dataset ? a.dataset.act : null, v = a && a.dataset ? a.dataset.v : undefined;
+    const card = a && a.dataset ? a.dataset.card : undefined;
     renderNow();
-    // Rebuilt buttons drop keyboard focus: put it back on the same one (or the app) so Tab doesn't start over.
-    if (act && state.open && !(root.activeElement && root.activeElement.isConnected)) {
-      const same = v == null ? null : [...root.querySelectorAll(`[data-act="${act}"]`)].find((el) => el.dataset.v === v);
-      const t = same || root.querySelector(`[data-act="${act}"]`);
-      (t && t.offsetParent ? t : app).focus({ preventScroll: true });
+    // Rebuilt buttons and links drop keyboard focus: put it back on the same one (or the app) so
+    // Tab doesn't start over or wander onto the page underneath.
+    if ((act || card != null) && state.open && !(root.activeElement && root.activeElement.isConnected)) {
+      const same = act
+        ? (v == null ? null : [...root.querySelectorAll(`[data-act="${act}"]`)].find((el) => el.dataset.v === v)) || root.querySelector(`[data-act="${act}"]`)
+        : [...root.querySelectorAll('[data-card]')].find((el) => el.dataset.card === card);
+      (same && same.offsetParent ? same : app).focus({ preventScroll: true });
     }
   }
   function renderNow() {
@@ -404,7 +426,7 @@ import {
     const have = state.items.length > 0;
     ref('controls').hidden = !have; ref('summary').hidden = !have;
     if (!have) {
-      list.innerHTML = state.loading ? '<li class="skeleton"></li>'.repeat(4) : '';
+      setList(list, state.loading ? '<li class="skeleton"></li>'.repeat(4) : '');
       status.hidden = state.loading;
       status.innerHTML = state.loading ? '' : statusHtml(state.blocked ? '🛡️' : '⚠️',
         state.blocked ? 'Quick check needed' : "Couldn't load deals", state.blocked ? 'Vitamin Shoppe wants to confirm a person is browsing. Tap Reload page, complete any check, and Deals reopens.' : esc(state.error || "Vitamin Shoppe didn't send any deals."),
@@ -415,31 +437,33 @@ import {
     renderControls();
     const deals = visible();
     const total = state.items.length;
-    ref('summary').innerHTML = `<span class="count" aria-label="Showing ${deals.length} of ${total} deals">${deals.length === total ? `${total} deals` : `${deals.length} of ${total}`}</span>
+    const said = `Showing ${deals.length} of ${total} deals`;
+    if (ref('live').textContent !== said) ref('live').textContent = said;
+    ref('summary').innerHTML = `<span class="count" aria-hidden="true">${deals.length === total ? `${total} deals` : `${deals.length} of ${total}`}</span>
       ${deals.length ? `<button class="tonal-btn" data-act="ai">🧠 Ask AI (${Math.min(deals.length, AI_MAX_ITEMS)})</button>` : ''}
       <label class="sort"><span class="vh">Sort by</span><select data-ref="sort">${SORTS.map((o) => `<option value="${o.id}"${o.id === state.sort ? ' selected' : ''}>⇅ ${esc(o.short)}</option>`).join('')}</select></label>`;
     if (state.mode === 'pickup' && state.stockLoading && !deals.length) {
-      list.innerHTML = ''; status.hidden = false;
+      setList(list, ''); status.hidden = false;
       status.innerHTML = statusHtml('🏬', 'Checking shelves…', `Looking up stock at ${esc(state.store.name)}.`);
       return;
     }
     if (state.mode === 'pickup' && state.store && !hasStock() && !state.stockLoading) {
-      list.innerHTML = ''; status.hidden = false; ref('summary').hidden = true;
+      setList(list, ''); status.hidden = false; ref('summary').hidden = true;
       status.innerHTML = statusHtml('🏬', state.stockBlocked ? 'Quick check needed' : "Couldn't check shelves",
         esc(state.stockError || `We couldn't get stock for ${state.store.name}.`),
         [[state.stockBlocked ? 'Reload page' : 'Try again', state.stockBlocked ? 'reload-page' : 'retry-stock', true], ['Show ship-to-home', 'ship']]);
       return;
     }
     if (!deals.length && state.mode === 'pickup' && state.stockError && hasStock()) {
-      list.innerHTML = ''; status.hidden = false;
+      setList(list, ''); status.hidden = false;
       status.innerHTML = statusHtml('🏬', "Couldn't re-check shelves",
         `Nothing matched in the stock checked ${relativeTime(state.stock.at)} — it may have changed since.`,
         [[state.stockBlocked ? 'Reload page' : 'Try again', state.stockBlocked ? 'reload-page' : 'retry-stock', true], ['Show ship-to-home', 'ship']]);
       return;
     }
-    if (!deals.length) { list.innerHTML = ''; status.hidden = false; status.innerHTML = noMatchesHtml(); return; }
+    if (!deals.length) { setList(list, ''); status.hidden = false; status.innerHTML = noMatchesHtml(); return; }
     status.hidden = true;
-    list.innerHTML = deals.map(cardHtml).join('');
+    setList(list, deals.map(cardHtml).join(''));
   }
 
   let lastBannerHtml = null;
@@ -458,7 +482,8 @@ import {
       html = `<div class="banner info"><span>Shelf stock at ${esc(state.store?.name || 'your store')} ${state.stockBlocked ? 'needs a quick check' : "couldn't be checked"}.</span><button class="text-btn" data-act="${state.stockBlocked ? 'reload-page' : 'retry-stock'}">${state.stockBlocked ? 'Reload page' : 'Retry'}</button></div>`;
     } else if (state.stockError && !(state.mode === 'pickup' && (!hasStock() || !visible().length))) {
       // (In pickup with nothing to show, the full-page panel below says it instead.)
-      const age = hasStock() ? ` · showing stock checked ${relativeTime(state.stock.at)}` : '';
+      // The age only matters when the counts on screen are from an earlier check.
+      const age = hasStock() && Date.now() - state.stock.at > 10 * 60_000 ? ` · showing stock checked ${relativeTime(state.stock.at)}` : '';
       html = `<div class="banner bad"><span>${esc(state.stockError.replace(/\.$/, ''))}${age}.</span><button class="text-btn" data-act="${state.stockBlocked ? 'reload-page' : 'retry-stock'}">${state.stockBlocked ? 'Reload page' : 'Retry'}</button></div>`;
     } else if (hasStock() && !state.stockLoading && Date.now() - (state.stock.at || 0) > 6 * 3600e3) {
       // 7. shelf stock's age said once, not on every card
@@ -480,8 +505,8 @@ import {
     const n = changeIds().size;
     ref('controls').innerHTML = `
       <div class="segmented" role="radiogroup" aria-label="Fulfillment">
-        <button role="radio" data-act="mode" data-v="ship" aria-checked="${state.mode === 'ship'}">Ship</button>
-        <button role="radio" data-act="mode" data-v="pickup" aria-checked="${state.mode === 'pickup'}">Pick up</button>
+        <button role="radio" data-act="mode" data-v="ship" aria-checked="${state.mode === 'ship'}" tabindex="${state.mode === 'ship' ? 0 : -1}">Ship</button>
+        <button role="radio" data-act="mode" data-v="pickup" aria-checked="${state.mode === 'pickup'}" tabindex="${state.mode === 'pickup' ? 0 : -1}">Pick up</button>
       </div>
       <button class="store-row" data-act="stores">
         <span aria-hidden="true">📍</span>
@@ -511,8 +536,8 @@ import {
       <a class="thumb${d.img ? '' : ' none'}" href="${esc(d.url)}" tabindex="-1" aria-hidden="true">${d.img ? `<img src="${esc(d.img)}" alt="" loading="lazy">` : '📦'}</a>
       <div class="body">
         <div class="brandline"><span class="brand">${esc(d.brand || 'Vitamin Shoppe')}</span>${isNew ? '<span class="tag new">NEW</span>' : ''}${was != null ? '<span class="tag drop">PRICE DROP</span>' : ''}</div>
-        <a class="title" href="${esc(d.url)}">${esc(d.title)}</a>
-        <div class="prices"><span class="price">${est != null ? '≈' : ''}${money(bestPrice(d))}</span>${off ? `<span class="was">${money(d.list)}</span><span class="tag off">−${off}%</span>` : ''}</div>
+        <a class="title" data-card="${esc(d.id)}" href="${esc(d.url)}">${esc(d.title)}</a>
+        <div class="prices"><span class="price">${est != null ? '≈' : ''}${money(bestPrice(d))}</span>${off ? `<span class="vh">was </span><span class="was">${money(d.list)}</span><span class="tag off" aria-label="${off}% off">−${off}%</span>` : ''}</div>
         ${was != null ? `<span class="note">Down from <s>${money(was)}</s> since your last check</span>` : ''}
         ${est != null ? `<span class="note">🛒 Extra ${d.cart}% off in cart (lists ${money(d.site)})</span>` : ''}
         ${adp ? `<span class="note">${money(adp)} with Auto Delivery</span>` : ''}
@@ -555,7 +580,11 @@ import {
     if (kind === 'stores') {
       const input = ref('sheet').querySelector('input');
       if (storeSearch.query && !storeSearch.results.length) searchStores();
-      setTimeout(() => input && !storeSearch.query && input.focus(), 50);
+      // A saved search shows its results: start at the heading rather than on a store hidden behind it.
+      setTimeout(() => {
+        if (input && !storeSearch.query) input.focus();
+        else { const h = ref('sheet').querySelector('h2'); if (h) h.focus({ preventScroll: true }); }
+      }, 50);
     }
   }
   function closeSheet() {
@@ -579,10 +608,10 @@ import {
             ${today ? `<small class="${why ? 'err' : ''}">${esc(today)}</small>` : ''}</span>
           <span class="dist">${s.dist >= 0 ? (s.dist < 10 ? s.dist.toFixed(1) : Math.round(s.dist)) + ' mi' : ''}</span></button>`;
       }).join('');
-      sheet.innerHTML = `<h2 id="vsx-sheet-title">Choose your store</h2><p class="muted">We'll check which clearance items are on the shelf there.</p>
+      sheet.innerHTML = `<h2 id="vsx-sheet-title" tabindex="-1">Choose your store</h2><p class="muted">We'll check which clearance items are on the shelf there.</p>
         <form data-ref="storeForm" class="store-form"><input type="search" inputmode="search" placeholder="ZIP code or City, ST" value="${esc(storeSearch.query)}" aria-label="ZIP code or city">
           <button class="primary-btn" type="submit"${storeSearch.searching ? ' disabled aria-busy="true"' : ''}>${storeSearch.searching ? 'Searching…' : 'Search'}</button></form>
-        ${storeSearch.message ? `<p class="err">${esc(storeSearch.message)}${storeSearch.blocked ? ' Reload the page, complete any check, then search again.' : ''}</p>${storeSearch.blocked ? '<button class="outline-btn" data-act="reload-page">Reload page</button>' : ''}` : ''}
+        ${storeSearch.message ? `<p class="err" role="alert">${esc(storeSearch.message)}${storeSearch.blocked ? ' Reload the page, complete any check, then search again.' : ''}</p>${storeSearch.blocked ? '<button class="outline-btn" data-act="reload-page">Reload page</button>' : ''}` : ''}
         <div class="stores">${rows}</div>
         ${state.store ? '<button class="outline-btn" data-act="clear-store">Clear store · ship to home only</button>' : ''}
         <button class="text-btn close" data-act="close-sheet">Close</button>`;
@@ -712,6 +741,16 @@ import {
   }
   root.addEventListener('keydown', onEscape);
   root.addEventListener('keydown', (e) => {
+    const t = e.composedPath ? e.composedPath()[0] : e.target;
+    if (!t || !t.dataset || t.dataset.act !== 'mode' || !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
+    e.preventDefault();
+    const other = t.dataset.v === 'ship' ? 'pickup' : 'ship';
+    const btn = root.querySelector(`[data-act="mode"][data-v="${other}"]`);
+    if (!btn) return;
+    btn.click();
+    setTimeout(() => { const now = root.querySelector(`[data-act="mode"][data-v="${other}"]`); if (now && !state.sheet) now.focus(); }, 0);
+  });
+  root.addEventListener('keydown', (e) => {
     if (e.key !== 'Tab' || !state.open) return;
     const box = state.sheet ? ref('sheet') : app;
     const items = [...box.querySelectorAll('a[href], button:not([disabled]), input, select, textarea, [tabindex]:not([tabindex="-1"])')]
@@ -724,7 +763,11 @@ import {
   });
   // After a click re-renders the clicked button (or a sheet closes), focus drops to the page,
   // outside the overlay: catch Esc there too.
-  document.addEventListener('keydown', (e) => { if (!root.activeElement) onEscape(e); }, true);
+  document.addEventListener('keydown', (e) => {
+    if (root.activeElement || !state.open) return;
+    if (e.key === 'Tab') { e.preventDefault(); app.focus({ preventScroll: true }); return; } // back inside, not onto the page
+    onEscape(e);
+  }, true);
   launcher.addEventListener('click', openApp);
 
   /** #vsdeals-share=<base64url {"url","token"}> from the owner's /setup page pairs this browser. */
@@ -766,9 +809,30 @@ import {
       host.remove();
       document.documentElement.style.overflow = '';
     } else if (!check && !host.isConnected) {
-      document.body.appendChild(host);
-      if (reopenAfterCheck) { reopenAfterCheck = false; openApp(); }
+      attach(pendingPaired);
     }
+  }
+  let restored = false, pendingPaired = null;
+  /** Puts Deals on the page; the first time, also restores where the user was (search, scroll, sheet). */
+  function attach(paired) {
+    document.body.appendChild(host);
+    const wantOpen = reopenAfterCheck || !!paired || location.hash === '#vsdeals';
+    reopenAfterCheck = false; pendingPaired = null;
+    if (restored) { if (wantOpen) openApp(); return; }
+    restored = true;
+    // Back from a product page: the same search and scroll position (only read on the Deals page,
+    // so a product page that also runs this script doesn't use it up).
+    let view = null;
+    if (location.hash === '#vsdeals') {
+      try { view = JSON.parse(sessionStorage.getItem('vsx.view') || 'null'); sessionStorage.removeItem('vsx.view'); } catch { /* private mode */ }
+      if (view && Date.now() - view.at < 30 * 60_000) { state.query = view.q || ''; ref('q').value = state.query; } else view = null;
+    }
+    if (wantOpen) openApp();
+    if (view && state.open && view.top) requestAnimationFrame(() => { ref('scroll').scrollTop = view.top; });
+    let reopen = null;
+    try { reopen = sessionStorage.getItem('vsx.reopen'); sessionStorage.removeItem('vsx.reopen'); } catch { /* private mode */ }
+    if (reopen === 'stores' && state.open) openSheet('stores');
+    if (paired && state.raw.length && state.savedAt && Date.now() - state.savedAt <= 10 * 60_000) publish();
   }
   function mount() {
     if (!document.body) return setTimeout(mount, 50);
@@ -784,20 +848,8 @@ import {
     if (location.hash === '#vsdeals') put('launcher', true);
     launcher.hidden = !get('launcher', true);
     // Leave a check alone; Deals mounts (and opens, if asked) once it's done.
-    if (onCheckPage()) { reopenAfterCheck = !!paired || location.hash === '#vsdeals'; return; }
-    document.body.appendChild(host);
-    // Back from a product page: the same search and scroll position as before.
-    let view = null;
-    try { view = JSON.parse(sessionStorage.getItem('vsx.view') || 'null'); sessionStorage.removeItem('vsx.view'); } catch { /* private mode */ }
-    if (view && Date.now() - view.at < 30 * 60_000 && location.hash === '#vsdeals') {
-      state.query = view.q || ''; ref('q').value = state.query;
-    }
-    if (paired || location.hash === '#vsdeals') openApp();
-    if (view && state.open && view.top) requestAnimationFrame(() => { ref('scroll').scrollTop = view.top; });
-    let reopen = null;
-    try { reopen = sessionStorage.getItem('vsx.reopen'); sessionStorage.removeItem('vsx.reopen'); } catch { /* private mode */ }
-    if (reopen === 'stores' && state.open) openSheet('stores');
-    if (paired && state.raw.length && state.savedAt && Date.now() - state.savedAt <= 10 * 60_000) publish();
+    if (onCheckPage()) { reopenAfterCheck = !!paired || location.hash === '#vsdeals'; pendingPaired = paired; return; }
+    attach(paired);
   }
   mount();
   window.addEventListener('hashchange', () => { if (location.hash === '#vsdeals' && !state.open) openApp(); });

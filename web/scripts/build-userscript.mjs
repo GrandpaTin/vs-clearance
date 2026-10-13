@@ -16,7 +16,7 @@ const read = (p) => fs.readFileSync(path.join(root, p), 'utf8');
 const core = read('public/core.js').replace(/^export\s+/gm, '');
 const overlay = read('userscript/overlay.js').replace(/^import[\s\S]*?from\s+'[^']+';\s*$/m, '').replace(/^\/\* global .*\*\/\s*$/m, '');
 const css = read('userscript/overlay.css');
-const base = process.env.PUBLIC_URL || 'https://dn.tail59aab8.ts.net:10000';
+const base = process.env.PUBLIC_URL || 'https://grandpatin.github.io/vs-clearance';
 
 const header = `// ==UserScript==
 // @name         VS Clearance — Vitamin Shoppe deal finder

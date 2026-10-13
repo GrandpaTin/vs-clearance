@@ -239,6 +239,9 @@ details summary::-webkit-details-marker { display: none; }
 details summary::before { content: "▸"; transition: transform .15s; }
 details[open] summary::before { transform: rotate(90deg); }
 .count:focus { outline: none; }
+.count:focus-visible { outline: 3px solid var(--focus, currentColor); outline-offset: 2px; border-radius: 4px; }
+/* Off-screen cards skip layout and paint until scrolled near: keeps typing and filters quick on phones. */
+.card { content-visibility: auto; contain-intrinsic-size: auto 200px; }
 pre { white-space: pre-wrap; background: var(--surface-2); border-radius: 12px; padding: 12px; max-height: 300px; overflow: auto; font-size: 12px; margin: 0; }
 .close { justify-self: end; }
 

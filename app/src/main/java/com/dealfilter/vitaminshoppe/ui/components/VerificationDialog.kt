@@ -19,6 +19,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -48,9 +52,13 @@ fun VerificationDialog(
     }
     // The check may have been loaded in the background with resources skipped; load it fresh now
     // that it's on screen, so the slider/puzzle renders at the visible size with everything allowed.
+    // Once per showing: after a rotation the check is already on screen, maybe half done.
+    var loadedForDisplay by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(session) {
+        if (loadedForDisplay) return@LaunchedEffect
         delay(150)
         session.refreshForDisplay()
+        loadedForDisplay = true
     }
     Dialog(
         onDismissRequest = onCancel,
@@ -65,7 +73,7 @@ fun VerificationDialog(
                     Column(modifier = Modifier.weight(1f)) {
                         Text("Quick check from Vitamin Shoppe", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                         Text(
-                            "The site wants to confirm a person is browsing. Complete the check below — we'll continue automatically.",
+                            "The site wants to confirm a person is browsing. Complete the check below, then tap Continue if this doesn't close by itself.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )

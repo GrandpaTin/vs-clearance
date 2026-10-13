@@ -44,6 +44,7 @@ function savePrefs() {
 // ------------------------------------------------------------------- data
 
 let quietFailures = 0;
+let inflight = null;
 
 async function load({ manual = false } = {}) {
   $('refresh').classList.add('spin');
@@ -52,10 +53,13 @@ async function load({ manual = false } = {}) {
   const hadList = !!state.snapshot;
   const previousPublished = state.snapshot?.publishedAt;
   let changed = true;
+  // Never leave a stalled connection unexplained: after 15 s say so. With a list on screen, give
+  // up on the check; on a first visit keep the (large) download going and take it if it lands.
+  const abort = new AbortController();
+  // A retry replaces a download still hanging (two would only compete on a weak signal).
+  if (inflight) { inflight.superseded = true; inflight.abort(); }
+  inflight = abort;
   try {
-    // Never leave a stalled connection unexplained: after 15 s say so. With a list on screen, give
-    // up on the check; on a first visit keep the (large) download going and take it if it lands.
-    const abort = new AbortController();
     let timer = setTimeout(function stalled() {
       if (hadList || state.snapshot) return abort.abort();
       state.loading = false;
@@ -91,7 +95,8 @@ async function load({ manual = false } = {}) {
       return;
     }
     if (!fromCache) state.etag = res.headers.get('ETag');
-    const snap = await res.json();
+    let snap;
+    try { snap = await res.json(); } catch { throw Object.assign(new Error('unreadable'), { unreadable: true }); }
     acceptSnapshot(snap);
     quietFailures = 0;
     state.error = fromCache ? cached : null;
@@ -101,8 +106,9 @@ async function load({ manual = false } = {}) {
       : oldList() ? `Loaded · this list is from ${relativeTime(snap.savedAt || snap.publishedAt)}`
       : hadList ? 'Updated' : 'Deals loaded');
   } catch (e) {
-    const failure = navigator.onLine === false ? 'offline' : 'failed';
-    if (!manual && !wasLoading && state.snapshot && failure === 'failed' && ++quietFailures < 2) {
+    if (abort.superseded) { changed = false; return; } // a newer attempt took over
+    const failure = navigator.onLine === false ? 'offline' : e && e.unreadable ? 'bad' : 'failed';
+    if (!manual && !wasLoading && state.snapshot && failure !== 'offline' && ++quietFailures < 2) {
       changed = false;
       return; // flaky mobile data: wait for the next check before warning
     }
@@ -111,6 +117,8 @@ async function load({ manual = false } = {}) {
     if (manual && state.snapshot && before === state.error) toast(state.error === 'offline' ? 'Still offline' : state.error === 'slow' ? 'Connection is still slow' : 'Still couldn’t check for updates');
     changed = !state.snapshot;
   } finally {
+    if (inflight === abort) inflight = null;
+    if (abort.superseded) return; // eslint-disable-line no-unsafe-finally -- the newer attempt renders
     state.loading = false;
     $('refresh').classList.remove('spin');
     // Rebuilding the list knocks keyboard focus off the page, so the background poll only
@@ -185,7 +193,9 @@ for (const id of ['floor-chips', 'cat-chips']) $(id).addEventListener('scroll', 
 function render() {
   const key = focusKey();
   renderBody();
-  if (state.snapshot) revealActiveChips();
+  // After layout settles: measuring the chip rows right after swapping in hundreds of cards would
+  // force the whole list to lay out on the spot.
+  if (state.snapshot) requestAnimationFrame(revealActiveChips);
   if (!key) return;
   const again = document.querySelector('#main ' + key);
   if (again && again.offsetParent) again.focus({ preventScroll: true });
@@ -197,13 +207,13 @@ function renderHeader() {
   if (state.loading) $('subtitle').textContent = snap ? 'Checking for newer deals…' : 'Loading…';
   else if (snap) {
     const n = changeIds().size;
-    $('subtitle').textContent = `Updated ${relativeTime(snap.savedAt || snap.publishedAt)}` + (n ? ` · ${n} new or cheaper` : '');
+    $('subtitle').textContent = `${oldList() ? 'List from' : 'Updated'} ${relativeTime(snap.savedAt || snap.publishedAt)}` + (n ? ` · ${n} new or cheaper` : '');
   } else $('subtitle').textContent = 'Shared clearance list';
 
   // banner for stale / failed refresh with data on screen
   // Before there's a list, "browse here" and a search box would promise something that isn't there.
   document.querySelector('.search').hidden = (!snap && !state.loading) || (!!snap && !state.items.length);
-  const notice = !!snap && (!!state.error || Date.now() - (snap.savedAt || snap.publishedAt) > 36 * 3600e3);
+  const notice = !!snap && (!!state.error || (state.items.length > 0 && Date.now() - (snap.savedAt || snap.publishedAt) > 36 * 3600e3));
   // One banner at a time: a stale or failed-update notice (which links to the app too) wins.
   $('intro').hidden = !introWanted || !snap || !state.items.length || notice ||
     !$('update-banner').hidden;
@@ -217,12 +227,12 @@ function renderHeader() {
   if (snap && state.error) {
     banner.hidden = false;
     const shown = oldList() ? `showing the list from ${relativeTime(snap.savedAt || snap.publishedAt)} — prices may have changed` : 'showing the last deals loaded';
-    const why = state.error === 'offline' ? 'You’re offline' : state.error === 'slow' ? 'Connection is slow' : 'Couldn’t check for updates';
+    const why = state.error === 'offline' ? 'You’re offline' : state.error === 'slow' ? 'Connection is slow' : state.error === 'bad' ? 'Couldn’t read the latest list' : 'Couldn’t check for updates';
     banner.innerHTML = `<span>${why} · ${shown}.</span>` +
       '<button class="text-btn" type="button" data-act="refresh">Try again</button>';
     if (hadFocus) banner.querySelector('button').focus();
   }
-  else if (snap && Date.now() - (snap.savedAt || snap.publishedAt) > 36 * 3600e3) {
+  else if (snap && state.items.length && Date.now() - (snap.savedAt || snap.publishedAt) > 36 * 3600e3) {
     banner.hidden = false;
     const age = relativeTime(snap.savedAt || snap.publishedAt);
     if (store.get('staleAck', null) === snap.publishedAt) {
@@ -267,6 +277,7 @@ function renderBody() {
       ? statusHtml('🏷️', 'No deals shared yet', 'The person who sent this link hasn’t shared a list yet. You can still get VS Clearance for your own phone or computer — it’s free.', [['Get the app', 'get', true]])
       : statusHtml('⚠️', 'Couldn’t load deals', state.error === 'offline' || navigator.onLine === false
         ? 'You seem to be offline. Check your connection and try again.'
+        : state.error === 'bad' ? 'The shared list couldn’t be read. Try again in a minute.'
         : 'The deals server didn’t answer. Try again in a minute.', [['Try again', 'retry', true]]);
     return;
   }
@@ -332,9 +343,10 @@ function renderControls() {
     sort: state.sort, onlyIds: state.onlyChanges ? changeIds() : null };
   let prev = -1;
   // Nothing matches at all: the empty state offers the fixes, so a row of zeros would only add noise.
-  const none = applyFilters(state.items, { ...base, minDiscount: 0 }).length === 0;
+  const counting = { ...base, unsorted: true };
+  const none = applyFilters(state.items, { ...counting, minDiscount: 0 }).length === 0;
   for (const f of none ? [] : FLOORS) {
-    const n = applyFilters(state.items, { ...base, minDiscount: f }).length;
+    const n = applyFilters(state.items, { ...counting, minDiscount: f }).length;
     if (f && (n === 0 || n > prev * 0.97) && state.floor !== f) continue;
     prev = n;
     chips.push(`<button class="chip" data-act="floor" data-v="${f}" aria-pressed="${state.floor === f}">${f ? f + '%+ off' : 'Any discount'} <span class="n">${n}</span></button>`);
@@ -345,7 +357,7 @@ function renderControls() {
   renderControls.hadClear = hasClear;
 
   // Category chips count within the other filters; the rest of the categories live in "More".
-  const catBase = { ...base, minDiscount: state.floor, category: null };
+  const catBase = { ...base, minDiscount: state.floor, category: null, unsorted: true };
   const inView = applyFilters(state.items, catBase);
   const all = categoryCounts(state.items);
   const countIn = (c) => inView.filter((d) => inCategory(d.category, c)).length;
@@ -523,8 +535,19 @@ async function shareDeal(d) {
     else { await navigator.clipboard.writeText(`${text}\n${d.url}`); toast('Deal copied'); }
   } catch (e) {
     if (e && e.name === 'AbortError') return; // closed the share sheet
-    prompt('Copy this deal:', `${text}\n${d.url}`);
+    toast(copyFallback(`${text}\n${d.url}`) ? 'Deal copied' : 'Couldn’t copy here — open the deal to share it from the store page');
   }
+}
+
+// Clipboard refused (some in-app browsers, older Safari): the old select-and-copy route.
+function copyFallback(text) {
+  const t = document.createElement('textarea');
+  t.value = text; t.setAttribute('readonly', ''); t.style.cssText = 'position:fixed;opacity:0;top:0';
+  document.body.appendChild(t); t.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch { /* not supported */ }
+  t.remove();
+  return ok;
 }
 
 // Offline (images aren't cached) or a missing product photo: show the 📦 placeholder, not a broken icon.

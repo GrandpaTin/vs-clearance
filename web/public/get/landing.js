@@ -11,9 +11,19 @@
     if (canShare) {
       navigator.share({ title: 'VS Clearance', text: 'Vitamin Shoppe clearance deal finder', url: url }).catch(function () {});
     } else if (navigator.clipboard) {
-      navigator.clipboard.writeText(url).then(done, function () { prompt('Copy this link:', url); });
+      navigator.clipboard.writeText(url).then(done, fallback);
     } else {
-      prompt('Copy this link:', url);
+      fallback();
+    }
+    // Clipboard refused: the old select-and-copy route, or show the link to copy by hand.
+    function fallback() {
+      var t = document.createElement('textarea');
+      t.value = url; t.setAttribute('readonly', ''); t.style.cssText = 'position:fixed;opacity:0;top:0';
+      document.body.appendChild(t); t.select();
+      var ok = false;
+      try { ok = document.execCommand('copy'); } catch (e) { /* not supported */ }
+      t.remove();
+      if (ok) done(); else btn.textContent = url;
     }
   });
   // Show download sizes so people know what they're getting.

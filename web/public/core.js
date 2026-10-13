@@ -147,12 +147,20 @@ function unitMatches(unit, t) {
   return squashed.length >= 5 && t.words.some((w) => w.includes(squashed));
 }
 
+// Each item's searchable text is prepared once, not on every keystroke for every filter count.
+const prepared = new WeakMap();
+function preparedFor(d) {
+  let t = prepared.get(d);
+  if (!t) { t = prepare([d.brand, d.title, d.category, d.form].filter(Boolean).join(' ')); prepared.set(d, t); }
+  return t;
+}
+
 export function matcher(query) {
   const units = searchUnits(query);
   const whole = units.join(' ');
   return (d) => {
     if (!units.length) return true;
-    const t = prepare([d.brand, d.title, d.category, d.form].filter(Boolean).join(' '));
+    const t = preparedFor(d);
     return unitMatches(whole, t) || units.every((u) => unitMatches(u, t));
   };
 }
@@ -216,6 +224,8 @@ export function applyFilters(items, c) {
     (c.mode === 'pickup' ? (d.qty || 0) > 0 : !c.inStockOnly || !d.oos) &&
     match(d)
   );
+  // Counts (chips, "anything at all?") don't need the order.
+  if (c.unsorted) return out;
   const sorted = sortDeals(out, c.sort);
   if (!normalize(c.query)) return sorted;
   // Stable: within each group the chosen sort still applies.
