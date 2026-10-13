@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   normalizeItem, cartEstimate, bestPrice, discount, autoDeliveryDeal, perServingLabel, facts, applyFilters, sortDeals,
-  changes, prune, aiPrompt, sizeLabel, shortSize, matcher, categoryCounts, inCategory, storeAddress, cleanCategory
+  changes, prune, aiPrompt, sizeLabel, shortSize, matcher, isListingDespiteStatus, categoryCounts, inCategory, storeAddress, cleanCategory
 } from '../public/core.js';
 
 // Same shape the Android app publishes (LocalStore.dealToJson, -1 = absent).
@@ -175,4 +175,12 @@ test('category names are tidied before grouping', () => {
   const items = [item('a', { category: 'Herbs A-E' }), item('b', { category: 'Herbs T-Z' })];
   assert.deepEqual(categoryCounts(items), [['Herbs', 2]]);
   assert.equal(applyFilters(items, { category: 'Herbs' }).length, 2);
+});
+
+test('a 404 that still carries the listing counts as data (site change, October 2026)', () => {
+  const listing = { response: { numProducts: 363, products: [{ pid: 'a' }] } };
+  assert.ok(isListingDespiteStatus(404, listing));
+  assert.ok(!isListingDespiteStatus(404, { response: { numProducts: 0, products: [] } }));
+  assert.ok(!isListingDespiteStatus(500, listing));
+  assert.ok(!isListingDespiteStatus(404, null));
 });

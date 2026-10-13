@@ -1,6 +1,5 @@
 package com.dealfilter.vitaminshoppe.ui.screens
 
-import android.text.format.DateUtils
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -29,6 +28,8 @@ import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.CloudOff
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
@@ -101,6 +102,18 @@ import com.dealfilter.vitaminshoppe.ui.theme.NavyPrimary
 import com.dealfilter.vitaminshoppe.ui.theme.SkyBlueSecondary
 import com.dealfilter.vitaminshoppe.ui.viewmodel.DealActions
 import com.dealfilter.vitaminshoppe.ui.viewmodel.DealUiState
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material.icons.filled.SystemUpdate
+import androidx.compose.material.icons.filled.MoreVert
+import com.dealfilter.vitaminshoppe.ui.components.plainNotes
+import com.dealfilter.vitaminshoppe.ui.components.UpdateDialog
+import com.dealfilter.vitaminshoppe.BuildConfig
+import com.dealfilter.vitaminshoppe.ui.viewmodel.RefreshNotice
+import com.dealfilter.vitaminshoppe.ui.viewmodel.ago
+import com.dealfilter.vitaminshoppe.ui.viewmodel.refreshNotice
 import com.dealfilter.vitaminshoppe.ui.viewmodel.DealViewModel
 import com.dealfilter.vitaminshoppe.ui.viewmodel.LoadStatus
 import kotlinx.coroutines.delay
@@ -120,6 +133,15 @@ fun DealScreen(viewModel: DealViewModel, modifier: Modifier = Modifier) {
             onToggle = viewModel::setWebShareEnabled,
             onPublishNow = viewModel::publishNow,
             onDismiss = viewModel::closeWebShare
+        )
+    }
+    if (state.update.isDialogOpen) {
+        UpdateDialog(
+            update = state.update,
+            onUpdate = viewModel::startUpdate,
+            onOpenSettings = { viewModel.openInstallPermission(context) },
+            onLater = viewModel::laterUpdate,
+            onDismiss = viewModel::closeUpdate
         )
     }
     if (state.isVerificationVisible) {
@@ -146,6 +168,7 @@ fun DealScreenContent(state: DealUiState, viewModel: DealActions, modifier: Modi
     val dark = DealTheme.badges.isDark
     val largeFont = LocalDensity.current.fontScale >= 1.3f
     val headerColor = if (dark) NavyDark else NavyPrimary
+    val now = rememberNowMillis()
 
     val scope = rememberCoroutineScope()
     LaunchedEffect(state.message) {
@@ -198,14 +221,14 @@ fun DealScreenContent(state: DealUiState, viewModel: DealActions, modifier: Modi
                                 color = Color.White,
                                 modifier = Modifier.semantics { heading() }
                             )
-                            HeaderSubtitle(state)
+                            HeaderSubtitle(state, now)
                         }
                     },
                     actions = {
                         IconButton(onClick = viewModel::openWebShare) {
                             Icon(
-                                if (state.webShare.enabled) Icons.Default.CloudDone else Icons.Default.CloudUpload,
-                                contentDescription = if (state.webShare.enabled) "Share to web (on)" else "Share to web",
+                                if (state.webShare.enabled && state.webShare.isConfigured) Icons.Default.CloudDone else Icons.Default.CloudUpload,
+                                contentDescription = if (state.webShare.enabled && state.webShare.isConfigured) "Share to web (on)" else "Share to web",
                                 tint = Color.White
                             )
                         }
@@ -222,6 +245,7 @@ fun DealScreenContent(state: DealUiState, viewModel: DealActions, modifier: Modi
                                 )
                             }
                         }
+                        AppMenu(viewModel)
                     },
                     colors = TopAppBarDefaults.topAppBarColors(containerColor = headerColor)
                 )
@@ -250,12 +274,15 @@ fun DealScreenContent(state: DealUiState, viewModel: DealActions, modifier: Modi
                 .fillMaxSize()
                 .nestedScroll(pullState.nestedScrollConnection)
         ) {
+            Column(Modifier.fillMaxSize()) {
+            // Pinned above the list: inside a LazyColumn a banner appearing at the top is scrolled
+            // out of sight (the list stays anchored to the first row), which hid every refresh error.
+            Banners(state, viewModel, now)
             LazyColumn(
                 state = listState,
                 contentPadding = PaddingValues(bottom = 96.dp),
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier.weight(1f).fillMaxWidth()
             ) {
-                item(key = "banner") { Banners(state, viewModel) }
                 item(key = "mode") {
                     ModeAndStoreRow(
                         mode = state.mode,
@@ -375,6 +402,7 @@ fun DealScreenContent(state: DealUiState, viewModel: DealActions, modifier: Modi
                     }
                 }
             }
+            }
             PullToRefreshContainer(state = pullState, modifier = Modifier.align(Alignment.TopCenter))
         }
     }
@@ -457,18 +485,21 @@ private fun NoMatches(state: DealUiState, viewModel: DealActions) {
     StatusMessage(icon = Icons.Default.SearchOff, title = "No matching deals", body = body, fixes = fixes)
 }
 
+/** The current time, ticking every 30 s so "saved 5 minutes ago" text stays true. */
 @Composable
-private fun HeaderSubtitle(state: DealUiState) {
+private fun rememberNowMillis(): Long {
     val now by produceState(System.currentTimeMillis()) {
         while (true) {
             delay(30_000)
             value = System.currentTimeMillis()
         }
     }
-    val updated = state.lastUpdatedMillis?.let {
-        if (now - it < DateUtils.MINUTE_IN_MILLIS) "just now"
-        else DateUtils.getRelativeTimeSpanString(it, now, DateUtils.MINUTE_IN_MILLIS).toString()
-    }
+    return now
+}
+
+@Composable
+private fun HeaderSubtitle(state: DealUiState, now: Long) {
+    val updated = state.lastUpdatedMillis?.let { ago(it, now) }
     val text = when {
         state.status == LoadStatus.LOADING -> "Loading live prices…"
         state.status == LoadStatus.REFRESHING -> "Refreshing…"
@@ -521,17 +552,58 @@ private fun SearchField(placeholder: String, query: String, onQueryChange: (Stri
     )
 }
 
+/** Overflow menu: app-level things that don't belong next to the deals. */
 @Composable
-private fun Banners(state: DealUiState, viewModel: DealActions) {
+private fun AppMenu(viewModel: DealActions) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { open = true }) {
+            Icon(Icons.Default.MoreVert, contentDescription = "More options", tint = Color.White)
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(
+                text = { Text("Check for updates") },
+                leadingIcon = { Icon(Icons.Default.SystemUpdate, contentDescription = null) },
+                onClick = { open = false; viewModel.checkForUpdates() }
+            )
+            DropdownMenuItem(
+                text = { Text("Version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})", style = MaterialTheme.typography.bodySmall) },
+                enabled = false,
+                onClick = {}
+            )
+        }
+    }
+}
+
+@Composable
+private fun Banners(state: DealUiState, viewModel: DealActions, now: Long) {
     val badges = DealTheme.badges
     Column {
-        if (state.hasData && state.loadError != null) {
+        val release = state.update.available
+        if (release != null && state.update.showBanner) {
             Banner(
-                icon = if (state.loadErrorIsOffline) Icons.Default.CloudOff else Icons.Default.ErrorOutline,
-                text = (if (state.loadErrorIsOffline) "Offline" else "Couldn't refresh") + " · showing saved deals",
+                icon = Icons.Default.SystemUpdate,
+                text = "Update available: ${release.versionName}",
+                detail = plainNotes(release.notes).lineSequence().firstOrNull { it.isNotBlank() }?.removePrefix("• "),
+                container = badges.skyBlueContainer,
+                content = badges.onSkyBlueContainer,
+                action = "Update",
+                onAction = viewModel::openUpdate
+            )
+        }
+        refreshNotice(state, now)?.let { notice ->
+            Banner(
+                icon = when (notice.kind) {
+                    RefreshNotice.Kind.OFFLINE -> Icons.Default.CloudOff
+                    RefreshNotice.Kind.VERIFY -> Icons.Default.VerifiedUser
+                    RefreshNotice.Kind.FAILED -> Icons.Default.ErrorOutline
+                    RefreshNotice.Kind.STALE -> Icons.Default.Schedule
+                },
+                text = notice.title,
+                detail = notice.detail,
                 container = badges.amberContainer,
                 content = badges.onAmberContainer,
-                action = "Retry",
+                action = notice.action,
                 onAction = viewModel::refresh
             )
         }
@@ -551,7 +623,15 @@ private fun Banners(state: DealUiState, viewModel: DealActions) {
 }
 
 @Composable
-private fun Banner(icon: ImageVector, text: String, container: Color, content: Color, action: String, onAction: () -> Unit) {
+private fun Banner(
+    icon: ImageVector,
+    text: String,
+    container: Color,
+    content: Color,
+    action: String,
+    onAction: () -> Unit,
+    detail: String? = null
+) {
     Surface(
         color = container,
         shape = RoundedCornerShape(12.dp),
@@ -562,7 +642,10 @@ private fun Banner(icon: ImageVector, text: String, container: Color, content: C
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp)) {
             Icon(icon, contentDescription = null, tint = content, modifier = Modifier.size(20.dp))
             Spacer(Modifier.width(10.dp))
-            Text(text, style = MaterialTheme.typography.bodyMedium, color = content, modifier = Modifier.weight(1f))
+            Column(Modifier.weight(1f).padding(vertical = 6.dp)) {
+                Text(text, style = MaterialTheme.typography.bodyMedium, color = content, fontWeight = if (detail != null) FontWeight.SemiBold else null)
+                if (detail != null) Text(detail, style = MaterialTheme.typography.bodySmall, color = content)
+            }
             TextButton(onClick = onAction) { Text(action, color = content, fontWeight = FontWeight.Bold) }
         }
     }

@@ -41,9 +41,11 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         (application as VitaminShoppeApp).webSession.setForeground(true)
+        viewModel.onAppForeground()
     }
 
     override fun onStop() {
+        viewModel.onAppBackground()
         (application as VitaminShoppeApp).webSession.setForeground(false)
         super.onStop()
     }

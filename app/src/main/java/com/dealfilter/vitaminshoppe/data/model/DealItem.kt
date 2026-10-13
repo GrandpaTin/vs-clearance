@@ -81,10 +81,11 @@ data class DealItem(
 
     /** Plain-text line block for the AI review prompt. */
     fun toPromptLines(index: Int, storeName: String?): String {
-        val price = if (hasCartOnlyPrice) {
-            "≈${formattedBestPrice} in cart (page shows $formattedSitePrice; site says $cartDiscountPercent% off list in cart)"
-        } else {
-            formattedBestPrice
+        val price = when {
+            hasCartOnlyPrice -> "≈$formattedBestPrice in cart (list $formattedListPrice; $cartDiscountPercent% off applied at checkout" +
+                (if (sitePercentOff > 0) ", page shows $formattedSitePrice)" else ")")
+            discountPercent > 0 -> "$formattedBestPrice (was $formattedListPrice, $discountPercent% off)"
+            else -> formattedBestPrice
         }
         val details = listOfNotNull(
             form,
@@ -95,12 +96,12 @@ data class DealItem(
         val stock = buildList {
             add(if (isOutOfStockOnline) "out of stock online" else "available online")
             if (storeName != null && storeQuantity != null) {
-                add(if (storeQuantity > 0) "$storeQuantity at $storeName" else "none at $storeName")
+                add(if (storeQuantity > 0) "$storeQuantity at $storeName" + (if (isPickupEligible) "" else " (walk-in only)") else "none at $storeName")
             }
         }.joinToString("; ")
         return buildString {
             append("$index. **$brand** — $title\n")
-            append("   - Price: $price (was $formattedListPrice, ${discountPercent}% off)\n")
+            append("   - Price: $price\n")
             autoDeliveryDeal?.let { append("   - Auto Delivery price: ${money(it)}\n") }
             append("   - Format: $details\n")
             append("   - Availability: $stock\n")

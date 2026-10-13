@@ -19,6 +19,19 @@ class VsApiTest {
     private fun item(id: String) = page.items.first { it.id == id }
 
     @Test
+    fun `a 404 that still carries the listing is accepted, an empty 404 is not`() {
+        val legacy = fixture("clearance_legacy_404.json")
+        assertTrue(VsApi.isListingDespiteStatus(404, legacy))
+        val parsed = VsApi.parseClearancePage(legacy)
+        assertEquals(2, parsed.items.size)
+        assertEquals(363, parsed.totalProducts)
+        assertEquals(2, parsed.totalPages)
+        assertFalse(VsApi.isListingDespiteStatus(404, fixture("clearance_real_404.json")))
+        assertFalse(VsApi.isListingDespiteStatus(500, legacy))
+        assertFalse(VsApi.isListingDespiteStatus(404, "<html>Not found</html>"))
+    }
+
+    @Test
     fun `listing keeps real products and drops promo tiles, duplicates and priceless rows`() {
         val ids = page.items.map { it.id }
         assertEquals(listOf("VS-5249", "VS-8540", "TM-16942", "GH-1003", "KA-15248", "NW-2414", "VS-5249", "ABS-1"), ids)

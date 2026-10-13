@@ -16,66 +16,135 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 
+/**
+ * Where shared lists go. GitHub Pages is used when it's set up (it stays online with every device
+ * off); otherwise the owner's own server; otherwise nothing, and the app works the same.
+ */
 data class WebShareState(
     val enabled: Boolean = false,
+    /** "https://github.com/owner/repo", or blank. */
+    val gitHubRepo: String = "",
+    val gitHubToken: String = "",
+    /** The owner's own VS Clearance server (e.g. over Tailscale), or blank. */
     val serverUrl: String = "",
-    val token: String = "",
+    val serverToken: String = "",
     val lastPublishedAt: Long? = null,
     val lastError: String? = null,
+    /** The last attempt couldn't reach its target; the list goes out on the next chance. */
+    val pending: Boolean = false,
     val isPublishing: Boolean = false
 ) {
-    val isConfigured: Boolean get() = serverUrl.isNotBlank() && token.isNotBlank()
+    enum class Status { NOT_SET_UP, OFF, SYNCING, WAITING, ERROR, LIVE, READY }
 
-    /** Where friends open the list: the GitHub Pages site for a repo target, else the server itself. */
+    val hasGitHub: Boolean get() = WebPublisher.gitHubRepo(gitHubRepo) != null && gitHubToken.isNotBlank()
+    val hasServer: Boolean get() = serverUrl.isNotBlank() && serverToken.isNotBlank()
+    val isConfigured: Boolean get() = hasGitHub || hasServer
+
+    /** GitHub wins when both are set up. */
+    val isGitHub: Boolean get() = hasGitHub
+
+    /** Where friends open the list. */
     val viewUrl: String
-        get() = WebPublisher.gitHubRepo(serverUrl)?.let { (owner, repo) -> "https://${owner.lowercase()}.github.io/$repo/" }
+        get() = WebPublisher.gitHubRepo(gitHubRepo)?.takeIf { hasGitHub || !hasServer }
+            ?.let { (owner, repo) -> "https://${owner.lowercase()}.github.io/$repo/" }
             ?: serverUrl
 
-    val isGitHub: Boolean get() = WebPublisher.gitHubRepo(serverUrl) != null
+    val status: Status
+        get() = when {
+            !isConfigured -> Status.NOT_SET_UP
+            !enabled -> Status.OFF
+            isPublishing -> Status.SYNCING
+            pending -> Status.WAITING
+            lastError != null -> Status.ERROR
+            lastPublishedAt != null -> Status.LIVE
+            else -> Status.READY
+        }
 }
 
 /**
- * Uploads the latest deals to the user's own VS Clearance web server so they can be viewed on a PC
- * or iPhone. The server can't fetch from vitaminshoppe.com itself (bot protection), so the phone,
- * which browses the site as a real user, is the data source.
+ * Uploads the latest deals so friends can see them on a PC or iPhone. Nothing here is on the app's
+ * critical path: the deal list never waits for it, failures are kept as [WebShareState.pending] and
+ * retried on the next refresh or when the network returns, and an unreachable target is skipped quietly.
  */
 class WebPublisher(
     context: Context,
-    defaultUrl: String = BuildConfig.SHARE_URL,
-    defaultToken: String = BuildConfig.SHARE_TOKEN
+    defaultServerUrl: String = BuildConfig.SHARE_URL,
+    defaultServerToken: String = BuildConfig.SHARE_TOKEN,
+    defaultGitHubRepo: String = BuildConfig.GITHUB_REPO,
+    defaultGitHubToken: String = BuildConfig.GITHUB_TOKEN
 ) {
     private val prefs = context.applicationContext.getSharedPreferences("vs_web_share", Context.MODE_PRIVATE)
     private val lock = Mutex()
 
-    // The owner build ships with its server built in, so sharing is on until the user says otherwise;
-    // anything saved on the phone (a pairing link, an edit, the switch) wins over the defaults.
-    private val builtIn = normalizeUrl(defaultUrl).isNotEmpty() && defaultToken.isNotBlank()
+    init {
+        migrateSingleTarget()
+        // Built-in owner defaults are written into the saved settings once, so a later update to a
+        // build without them (the public APK) keeps everything working. Saved values always win.
+        val edit = prefs.edit()
+        if (!prefs.contains(K_GH_REPO) && defaultGitHubRepo.isNotBlank()) edit.putString(K_GH_REPO, normalizeUrl(defaultGitHubRepo))
+        if (!prefs.contains(K_GH_TOKEN) && defaultGitHubToken.isNotBlank()) edit.putString(K_GH_TOKEN, defaultGitHubToken.trim())
+        if (!prefs.contains(K_SRV_URL) && defaultServerUrl.isNotBlank()) edit.putString(K_SRV_URL, normalizeUrl(defaultServerUrl))
+        if (!prefs.contains(K_SRV_TOKEN) && defaultServerToken.isNotBlank()) edit.putString(K_SRV_TOKEN, defaultServerToken.trim())
+        if (!prefs.contains(K_ENABLED)) {
+            val ready = (gitHubRepo(defaultGitHubRepo) != null && defaultGitHubToken.isNotBlank()) ||
+                (defaultServerUrl.isNotBlank() && defaultServerToken.isNotBlank())
+            edit.putBoolean(K_ENABLED, ready)
+        }
+        edit.apply()
+    }
 
-    private val _state = MutableStateFlow(
-        WebShareState(
-            enabled = prefs.getBoolean("enabled", builtIn),
-            serverUrl = prefs.getString("url", null) ?: if (builtIn) normalizeUrl(defaultUrl) else "",
-            token = prefs.getString("token", null) ?: if (builtIn) defaultToken.trim() else "",
-            lastPublishedAt = prefs.getLong("last", 0L).takeIf { it > 0 }
-        )
-    )
+    private val _state = MutableStateFlow(readState())
     val state: StateFlow<WebShareState> = _state.asStateFlow()
 
-    fun configure(serverUrl: String, token: String, enabled: Boolean) {
-        val url = normalizeUrl(serverUrl)
-        prefs.edit().putString("url", url).putString("token", token.trim()).putBoolean("enabled", enabled).apply()
-        _state.update { it.copy(serverUrl = url, token = token.trim(), enabled = enabled, lastError = null) }
+    private fun readState() = WebShareState(
+        enabled = prefs.getBoolean(K_ENABLED, false),
+        gitHubRepo = prefs.getString(K_GH_REPO, "") ?: "",
+        gitHubToken = prefs.getString(K_GH_TOKEN, "") ?: "",
+        serverUrl = prefs.getString(K_SRV_URL, "") ?: "",
+        serverToken = prefs.getString(K_SRV_TOKEN, "") ?: "",
+        lastPublishedAt = prefs.getLong(K_LAST, 0L).takeIf { it > 0 },
+        pending = prefs.getBoolean(K_PENDING, false)
+    )
+
+    /** Versions before 3.1 kept one target under "url"/"token"; sort it into the right slot. */
+    private fun migrateSingleTarget() {
+        val url = prefs.getString("url", null) ?: return
+        val token = prefs.getString("token", "") ?: ""
+        val edit = prefs.edit().remove("url").remove("token")
+        if (gitHubRepo(url) != null) edit.putString(K_GH_REPO, normalizeUrl(url)).putString(K_GH_TOKEN, token)
+        else edit.putString(K_SRV_URL, normalizeUrl(url)).putString(K_SRV_TOKEN, token)
+        edit.apply()
+    }
+
+    /** Saves both targets from the sheet. Blank fields clear that target. */
+    fun configure(gitHubRepo: String, gitHubToken: String, serverUrl: String, serverToken: String, enabled: Boolean) {
+        prefs.edit()
+            .putString(K_GH_REPO, normalizeUrl(gitHubRepo)).putString(K_GH_TOKEN, gitHubToken.trim())
+            .putString(K_SRV_URL, normalizeUrl(serverUrl)).putString(K_SRV_TOKEN, serverToken.trim())
+            .putBoolean(K_ENABLED, enabled)
+            .apply()
+        _state.update { readState().copy(lastPublishedAt = it.lastPublishedAt, pending = it.pending) }
+    }
+
+    /** One target from a pairing link (vsdeals://publish?url=&token=): it goes in the slot its address fits. */
+    fun configure(url: String, token: String, enabled: Boolean) {
+        val s = _state.value
+        if (gitHubRepo(url) != null) configure(url, token, s.serverUrl, s.serverToken, enabled)
+        else configure(s.gitHubRepo, s.gitHubToken, url, token, enabled)
     }
 
     fun setEnabled(enabled: Boolean) {
-        prefs.edit().putBoolean("enabled", enabled).apply()
+        prefs.edit().putBoolean(K_ENABLED, enabled).apply()
         _state.update { it.copy(enabled = enabled, lastError = null) }
     }
 
-    /** Returns null on success, or a user-facing error. */
+    private class Outcome(val error: String?, val retryLater: Boolean = false)
+
+    /** Returns null on success, or a user-facing reason (an unreachable target is marked pending). */
     suspend fun publish(
         items: List<DealItem>,
         savedAt: Long,
@@ -84,49 +153,65 @@ class WebPublisher(
         stock: Map<String, Int>
     ): String? = lock.withLock {
         val s = _state.value
-        if (!s.isConfigured) return@withLock "Add the server address and token first."
+        if (!s.isConfigured) return@withLock "Sharing isn't set up yet."
         _state.update { it.copy(isPublishing = true) }
-        val error = withContext(Dispatchers.IO) {
-            val gitHub = gitHubRepo(s.serverUrl)
-            if (gitHub != null) {
-                return@withContext try {
-                    publishToGitHub(gitHub, s.token, buildPayload(items, savedAt, store, stockStoreId, stock, System.currentTimeMillis()))
-                } catch (e: Exception) {
-                    "Couldn't reach GitHub (${e.javaClass.simpleName})."
-                }
-            }
-            try {
-                val body = buildPayload(items, savedAt, store, stockStoreId, stock).toByteArray(Charsets.UTF_8)
-                val conn = (URL(s.serverUrl.trimEnd('/') + "/api/snapshot").openConnection() as HttpURLConnection).apply {
-                    requestMethod = "POST"
-                    connectTimeout = 15_000
-                    readTimeout = 30_000
-                    doOutput = true
-                    setRequestProperty("Content-Type", "application/json")
-                    setRequestProperty("Authorization", "Bearer ${s.token}")
-                    setFixedLengthStreamingMode(body.size)
-                }
+        val outcome = withContext(Dispatchers.IO) {
+            val repo = gitHubRepo(s.gitHubRepo)
+            if (s.hasGitHub && repo != null) {
                 try {
-                    conn.outputStream.use { it.write(body) }
-                    when (val code = conn.responseCode) {
-                        in 200..299 -> null
-                        401 -> "The server rejected the token. Re-copy it from the server's /setup page."
-                        429 -> "The server is rate-limiting; try again in a minute."
-                        else -> "Server answered $code${readError(conn)?.let { ": $it" } ?: ""}"
-                    }
-                } finally {
-                    conn.disconnect()
+                    Outcome(publishToGitHub(repo, s.gitHubToken, buildPayload(items, savedAt, store, stockStoreId, stock, System.currentTimeMillis())))
+                } catch (e: IOException) {
+                    Outcome("Will sync when online", retryLater = true)
+                } catch (e: Exception) {
+                    Outcome("Couldn't publish to GitHub (${e.javaClass.simpleName}).")
                 }
-            } catch (e: Exception) {
-                "Couldn't reach ${Uri.parse(s.serverUrl).host ?: "the server"} (${e.javaClass.simpleName})."
+            } else {
+                publishToServer(s, buildPayload(items, savedAt, store, stockStoreId, stock))
             }
         }
         val now = System.currentTimeMillis()
-        if (error == null) prefs.edit().putLong("last", now).apply()
+        val ok = outcome.error == null
+        prefs.edit().putBoolean(K_PENDING, outcome.retryLater).apply { if (ok) putLong(K_LAST, now) }.apply()
         _state.update {
-            it.copy(isPublishing = false, lastError = error, lastPublishedAt = if (error == null) now else it.lastPublishedAt)
+            it.copy(
+                isPublishing = false,
+                pending = outcome.retryLater,
+                lastError = if (outcome.retryLater) null else outcome.error,
+                lastPublishedAt = if (ok) now else it.lastPublishedAt
+            )
         }
-        error
+        outcome.error
+    }
+
+    private fun publishToServer(s: WebShareState, payload: String): Outcome {
+        val body = payload.toByteArray(Charsets.UTF_8)
+        return try {
+            val conn = (URL(s.serverUrl.trimEnd('/') + "/api/snapshot").openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                // Short: an owner's PC that's off shouldn't hold anything up.
+                connectTimeout = 8_000
+                readTimeout = 30_000
+                doOutput = true
+                setRequestProperty("Content-Type", "application/json")
+                setRequestProperty("Authorization", "Bearer ${s.serverToken}")
+                setFixedLengthStreamingMode(body.size)
+            }
+            try {
+                conn.outputStream.use { it.write(body) }
+                when (val code = conn.responseCode) {
+                    in 200..299 -> Outcome(null)
+                    401 -> Outcome("The server rejected the token. Re-copy it from the server's /setup page.")
+                    429 -> Outcome("The server is busy; it will sync next time.", retryLater = true)
+                    in 500..599 -> Outcome("Will sync when your server is back", retryLater = true)
+                    else -> Outcome("Server answered $code${readError(conn)?.let { ": $it" } ?: ""}")
+                }
+            } finally {
+                conn.disconnect()
+            }
+        } catch (e: IOException) {
+            // PC off, Tailscale down or no network: not an error worth showing, just try again later.
+            Outcome("Will sync when ${Uri.parse(s.serverUrl).host ?: "your server"} is reachable", retryLater = true)
+        }
     }
 
     /**
@@ -204,6 +289,14 @@ class WebPublisher(
     }.getOrNull()
 
     companion object {
+        private const val K_ENABLED = "enabled"
+        private const val K_GH_REPO = "gh_repo"
+        private const val K_GH_TOKEN = "gh_token"
+        private const val K_SRV_URL = "srv_url"
+        private const val K_SRV_TOKEN = "srv_token"
+        private const val K_LAST = "last"
+        private const val K_PENDING = "pending"
+
         /** Same field names as the app's cache file, which the web app reads directly. */
         fun buildPayload(
             items: List<DealItem>,

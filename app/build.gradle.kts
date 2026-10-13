@@ -1,3 +1,5 @@
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Properties
 
 plugins {
@@ -5,18 +7,31 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
-// The owner build publishes to your own web server out of the box. Its address and token come from
-// files that are never committed or zipped: `share.url` / `share.token` in local.properties, with
-// the token falling back to the server's own web/data/config.json.
+// Private settings live in local.properties, which is never committed, zipped or uploaded:
+//   github.repo / github.token  - the owner build publishes the list to GitHub Pages
+//   share.url / share.token     - ...or to the owner's own server (token falls back to web/data/config.json)
+//   release.storeFile, release.storePassword, release.keyAlias, release.keyPassword - signing key
 val localProps = Properties().apply {
     rootProject.file("local.properties").takeIf { it.exists() }?.inputStream()?.use { load(it) }
 }
-val ownerShareUrl: String = localProps.getProperty("share.url", "")
-val ownerShareToken: String = localProps.getProperty("share.token")
-    ?: rootProject.file("web/data/config.json").takeIf { !ownerShareUrl.contains("github.com") }?.takeIf { it.exists() }?.readText()
+val ownerShareUrl: String = localProps.getProperty("share.url", "").takeIf { !it.contains("github.com") } ?: ""
+val ownerShareToken: String = if (ownerShareUrl.isBlank()) "" else localProps.getProperty("share.token")
+    ?: rootProject.file("web/data/config.json").takeIf { it.exists() }?.readText()
         ?.let { Regex("\"token\"\\s*:\\s*\"([^\"]+)\"").find(it)?.groupValues?.get(1) }
     ?: ""
+val ownerGitHubRepo: String = localProps.getProperty("github.repo", "")
+val ownerGitHubToken: String = localProps.getProperty("github.token", "")
 fun quoted(v: String) = "\"" + v.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+
+// versionName is kept in version.properties (bumped by scripts/release.mjs); versionCode is
+// date-based (yyMMddHH + tens of minutes, e.g. 261013173) so every build is newer than the last, or set exactly with -PversionCode=.
+val versionProps = Properties().apply {
+    rootProject.file("version.properties").takeIf { it.exists() }?.inputStream()?.use { load(it) }
+}
+val appVersionName: String = versionProps.getProperty("versionName", "3.0.0")
+val appVersionCode: Int = (project.findProperty("versionCode") as String?)?.toInt()
+    ?: Date().let { (SimpleDateFormat("yyMMddHH").format(it) + SimpleDateFormat("mm").format(it).toInt() / 10).toInt() }
+val releaseStore: File? = localProps.getProperty("release.storeFile")?.let { file(it) }?.takeIf { it.exists() }
 
 android {
     namespace = "com.dealfilter.vitaminshoppe"
@@ -26,8 +41,8 @@ android {
         applicationId = "com.dealfilter.vitaminshoppe"
         minSdk = 26
         targetSdk = 34
-        versionCode = 3
-        versionName = "3.0.0"
+        versionCode = appVersionCode
+        versionName = appVersionName
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -42,17 +57,39 @@ android {
             dimension = "audience"
             buildConfigField("String", "SHARE_URL", quoted(ownerShareUrl))
             buildConfigField("String", "SHARE_TOKEN", quoted(ownerShareToken))
+            buildConfigField("String", "GITHUB_REPO", quoted(ownerGitHubRepo))
+            buildConfigField("String", "GITHUB_TOKEN", quoted(ownerGitHubToken))
         }
-        // What the share page hands out: no server or token baked in.
+        // What the share page hands out: no server or token baked in; sharing starts off.
         create("everyone") {
             dimension = "audience"
             buildConfigField("String", "SHARE_URL", "\"\"")
             buildConfigField("String", "SHARE_TOKEN", "\"\"")
+            buildConfigField("String", "GITHUB_REPO", "\"\"")
+            buildConfigField("String", "GITHUB_TOKEN", "\"\"")
+        }
+    }
+
+    // In-app updates only install over an app signed with the same key, so every build made here
+    // (debug included) uses the one release key. Someone building from the source without it gets
+    // the standard debug key instead.
+    signingConfigs {
+        if (releaseStore != null) {
+            create("release") {
+                storeFile = releaseStore
+                storePassword = localProps.getProperty("release.storePassword")
+                keyAlias = localProps.getProperty("release.keyAlias")
+                keyPassword = localProps.getProperty("release.keyPassword")
+            }
         }
     }
 
     buildTypes {
+        debug {
+            signingConfigs.findByName("release")?.let { signingConfig = it }
+        }
         release {
+            signingConfigs.findByName("release")?.let { signingConfig = it }
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),

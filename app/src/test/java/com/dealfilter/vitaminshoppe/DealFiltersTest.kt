@@ -91,12 +91,12 @@ class DealFiltersTest {
     }
 
     @Test
-    fun `pickup mode shows only items on the shelf at the store`() {
+    fun `pickup mode shows everything on the shelf, walk-in-only included`() {
         val stocked = listOf(
             deal("x", qty = 3), deal("y", qty = 0), deal("z", qty = null), deal("w", qty = 5, pickup = false)
         )
         val result = DealFilters.apply(stocked, FilterCriteria(mode = FulfillmentMode.PICKUP))
-        assertEquals(listOf("x"), result.map { it.id })
+        assertEquals(setOf("x", "w"), result.map { it.id }.toSet())
     }
 
     @Test

@@ -430,6 +430,7 @@ document.addEventListener('click', async (e) => {
     case 'retry': return retryFirstLoad();
     case 'get': location.href = 'get/'; return;
     case 'refresh': return load({ manual: true });
+    case 'reload': location.reload(); return;
     case 'share': return shareDeal(state.items.find((d) => d.id === el.dataset.id));
   }
 });
@@ -582,7 +583,20 @@ setInterval(() => { if (document.visibilityState === 'visible') load(); }, 60_00
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') load(); });
 setInterval(() => { if (state.snapshot && document.visibilityState === 'visible') renderHeader(); }, 60_000);
 
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+// A new version of the site: the new service worker takes over and the page offers a reload.
+// (Not on the very first visit, when there was no worker before.)
+if ('serviceWorker' in navigator) {
+  const hadWorker = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.register('sw.js').then((reg) => {
+    // A tab left open for days still learns about new versions: hourly, and whenever it's looked at again.
+    const check = () => { if (document.visibilityState === 'visible') reg.update().catch(() => {}); };
+    setInterval(check, 3600e3);
+    document.addEventListener('visibilitychange', check);
+  }).catch(() => {});
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (hadWorker) $('update-banner').hidden = false;
+  });
+}
 
 render();
 load();

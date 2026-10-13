@@ -114,6 +114,7 @@ class WebSession(context: Context) : JsonFetcher {
                     withContext(Dispatchers.Main) { pageState = PageState.NOT_LOADED }
                     throw if (isOnline()) FetchException.Network("") else FetchException.Offline()
                 }
+                VsApi.isListingDespiteStatus(result.status, result.body) -> return result.body
                 result.status !in 200..299 -> throw FetchException.Http(result.status)
                 else -> return result.body
             }

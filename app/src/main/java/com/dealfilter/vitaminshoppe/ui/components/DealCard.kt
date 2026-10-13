@@ -152,7 +152,9 @@ fun DealCard(
                         Icon(Icons.Default.ShoppingCart, contentDescription = null, tint = badges.price, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(6.dp))
                         Text(
-                            "Extra ${deal.cartDiscountPercent}% off in cart (lists ${deal.formattedSitePrice})",
+                            // When the page price is the list price, "extra" and the repeated price add nothing.
+                            if (deal.sitePercentOff > 0) "Extra ${deal.cartDiscountPercent}% off in cart (page shows ${deal.formattedSitePrice})"
+                            else "${deal.cartDiscountPercent}% off at checkout",
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -283,7 +285,7 @@ private fun AvailabilityLine(deal: DealItem, store: StoreLocation?, isStockLoadi
         store != null && deal.storeQuantity == null && deal.jdaSkuId != null ->
             "Shelf stock unknown" to MaterialTheme.colorScheme.outline
         store != null && deal.storeQuantity != null && deal.storeQuantity > 0 ->
-            "${deal.storeQuantity} on the shelf" to badges.onEmeraldContainer
+            "${deal.storeQuantity} on the shelf" + (if (deal.isPickupEligible) "" else " · walk‑in only") to badges.onEmeraldContainer
         store != null && deal.storeQuantity != null ->
             (if (deal.isOutOfStockOnline) "Not in store · sold out online" else "Not in store · ships") to MaterialTheme.colorScheme.outline
         deal.isOutOfStockOnline -> "Out of stock online" to badges.onRedContainer

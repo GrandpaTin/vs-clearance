@@ -42,6 +42,16 @@ object VsApi {
     // Clearance listing
     // ---------------------------------------------------------------------------------------
 
+    private val HAS_PRODUCTS = Regex(""""numProducts"\s*:\s*[1-9]""")
+
+    /**
+     * Since October 2026 the search API answers its clearance path with HTTP 404 while still
+     * returning the complete listing (the store's web page moved; the API path didn't). A 404 that
+     * carries products is a real answer; one without them is still an error.
+     */
+    fun isListingDespiteStatus(status: Int, body: String): Boolean =
+        status == 404 && body.contains("\"products\":[{") && HAS_PRODUCTS.containsMatchIn(body)
+
     data class ClearancePage(val items: List<DealItem>, val totalPages: Int, val totalProducts: Int)
 
     private val CART_DISCOUNT = Regex("""(\d{1,2})\s*%\s*off\b.*\bin\s+cart""", RegexOption.IGNORE_CASE)

@@ -48,6 +48,9 @@ jobs:
           PUBLIC_URL="$BASE" node web/scripts/build-userscript.mjs
           mkdir -p _site
           cp -r web/public/. _site/
+          # A new code version gets a new service worker, so open tabs offer "New version available".
+          # (A new deals list redeploys the same commit, so it doesn't.)
+          sed -i "s/const VERSION = '\([^']*\)';/const VERSION = '\1-${GITHUB_SHA::7}';/" _site/sw.js
           # Link previews need absolute URLs (the local server fills these in per request).
           find _site -name '*.html' -exec sed -i "s|{{BASE}}|$BASE|g" {} +
           mkdir -p _site/api _site/downloads

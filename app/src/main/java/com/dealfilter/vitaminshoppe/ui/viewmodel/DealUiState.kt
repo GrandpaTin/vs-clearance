@@ -42,8 +42,11 @@ data class DealUiState(
     val onlyChanges: Boolean = false,
     val promptText: String? = null,
     val isVerificationVisible: Boolean = false,
+    /** The last refresh was stopped by the site's human check and hasn't been completed yet. */
+    val needsVerification: Boolean = false,
     val webShare: com.dealfilter.vitaminshoppe.data.remote.WebShareState = com.dealfilter.vitaminshoppe.data.remote.WebShareState(),
     val isWebShareOpen: Boolean = false,
+    val update: com.dealfilter.vitaminshoppe.data.update.UpdateState = com.dealfilter.vitaminshoppe.data.update.UpdateState(),
     val message: String? = null
 ) {
     val criteria: FilterCriteria

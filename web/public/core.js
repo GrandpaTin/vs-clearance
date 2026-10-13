@@ -339,6 +339,14 @@ export function storeAddress(s) {
   return [street, `${s.city}, ${s.state} ${s.zip}`.trim()].filter(Boolean).join(', ');
 }
 
+/**
+ * Since October 2026 the search API answers its clearance path with HTTP 404 while still returning
+ * the full listing. A 404 that carries products is a real answer; one without them is an error.
+ */
+export function isListingDespiteStatus(status, data) {
+  return status === 404 && Array.isArray(data?.response?.products) && data.response.products.length > 0;
+}
+
 export function relativeTime(ms, now = Date.now()) {
   const s = Math.max(0, Math.round((now - ms) / 1000));
   if (s < 60) return 'just now';

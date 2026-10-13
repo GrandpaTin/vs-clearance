@@ -1,6 +1,5 @@
 package com.dealfilter.vitaminshoppe.ui.components
 
-import android.text.format.DateUtils
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -11,17 +10,28 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CloudDone
+import androidx.compose.material.icons.filled.CloudOff
+import androidx.compose.material.icons.filled.CloudQueue
+import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -37,21 +47,43 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.dealfilter.vitaminshoppe.data.remote.WebShareState
+import com.dealfilter.vitaminshoppe.ui.viewmodel.ago
+
+/** What the sheet says about sharing right now, in plain words. */
+fun shareStatusText(share: WebShareState, now: Long): String = when (share.status) {
+    WebShareState.Status.NOT_SET_UP -> "Not set up — the app works fine without it."
+    WebShareState.Status.OFF -> "Sharing is off."
+    WebShareState.Status.SYNCING -> "Syncing…"
+    WebShareState.Status.WAITING -> "Will sync when online"
+    WebShareState.Status.ERROR -> share.lastError ?: "Couldn't sync."
+    WebShareState.Status.LIVE -> {
+        val at = share.lastPublishedAt ?: now
+        if (share.isGitHub && now - at < 2 * 60_000L) "Live on the site in about a minute"
+        else "Live on the site · synced ${ago(at, now)}"
+    }
+    WebShareState.Status.READY -> "Ready — tap Publish now."
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WebShareSheet(
     share: WebShareState,
-    onSave: (url: String, token: String, enabled: Boolean) -> Unit,
+    onSave: (gitHubRepo: String, gitHubToken: String, serverUrl: String, serverToken: String, enabled: Boolean) -> Unit,
     onToggle: (Boolean) -> Unit,
     onPublishNow: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    var url by rememberSaveable { mutableStateOf(share.serverUrl) }
-    var token by rememberSaveable { mutableStateOf(share.token) }
-    val dirty = url.trim() != share.serverUrl || token.trim() != share.token
+    var repo by rememberSaveable { mutableStateOf(share.gitHubRepo.removePrefix("https://")) }
+    var repoToken by rememberSaveable { mutableStateOf(share.gitHubToken) }
+    var server by rememberSaveable { mutableStateOf(share.serverUrl) }
+    var serverToken by rememberSaveable { mutableStateOf(share.serverToken) }
+    var showServer by rememberSaveable { mutableStateOf(share.serverUrl.isNotBlank() && !share.hasGitHub) }
+    val dirty = repo.trim() != share.gitHubRepo.removePrefix("https://") || repoToken.trim() != share.gitHubToken ||
+        server.trim().removePrefix("https://") != share.serverUrl.removePrefix("https://") || serverToken.trim() != share.serverToken
+    val canPublish = (repo.isNotBlank() && repoToken.isNotBlank()) || (server.isNotBlank() && serverToken.isNotBlank())
+    val now = System.currentTimeMillis()
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
         Column(
@@ -60,20 +92,18 @@ fun WebShareSheet(
                 .fillMaxWidth()
                 .navigationBarsPadding()
                 .imePadding()
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp)
                 .padding(bottom = 16.dp)
         ) {
             Text("Share to web", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             Text(
-                if (share.isConfigured && share.isGitHub) "Each refresh is published to your GitHub Pages site, so the shared link " +
-                    "always shows these deals (about a minute after syncing). Tapping the cloud button syncs right away."
-                else if (share.isConfigured) "Each refresh is sent to your web server, so the shared link always shows these deals. " +
-                    "Tapping the cloud button syncs right away."
-                else "Sends each refresh to your own VS Clearance web server so you can browse these deals on a PC or iPhone. " +
-                    "Easiest setup: open the pairing link from the server's /setup page on this phone.",
+                "Optional. Publishes each refresh so friends can open these deals from a link — on a PC or iPhone, " +
+                    "even when this phone is off. The app itself never needs it.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            StatusRow(share, now)
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
@@ -81,73 +111,105 @@ fun WebShareSheet(
                     .heightIn(min = 48.dp)
                     .toggleable(value = share.enabled, enabled = share.isConfigured, role = Role.Switch, onValueChange = onToggle)
             ) {
-                Text(
-                    if (share.isConfigured) "Publish after every refresh" else "Publish after every refresh (add server first)",
-                    style = MaterialTheme.typography.bodyLarge,
-                    modifier = Modifier.weight(1f)
-                )
+                Text("Publish after every refresh", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
                 Switch(checked = share.enabled, onCheckedChange = null, enabled = share.isConfigured)
             }
+
+            Text("GitHub Pages (recommended)", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
             OutlinedTextField(
-                value = url,
-                onValueChange = { url = it },
-                label = { Text("Server or GitHub repo") },
+                value = repo,
+                onValueChange = { repo = it },
+                label = { Text("GitHub repo") },
                 placeholder = { Text("github.com/you/vs-clearance") },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
                 modifier = Modifier.fillMaxWidth()
             )
             OutlinedTextField(
-                value = token,
-                onValueChange = { token = it },
-                label = { Text("Publish token") },
+                value = repoToken,
+                onValueChange = { repoToken = it },
+                label = { Text("GitHub token") },
+                supportingText = { Text("Fine-grained token for that repo only, with Contents: Read and write.") },
                 singleLine = true,
                 visualTransformation = PasswordVisualTransformation(),
                 modifier = Modifier.fillMaxWidth()
             )
-            val status = when {
-                share.isPublishing -> "Publishing…"
-                share.lastError != null -> share.lastError
-                share.lastPublishedAt != null && System.currentTimeMillis() - share.lastPublishedAt < DateUtils.MINUTE_IN_MILLIS ->
-                    "Synced just now"
-                share.lastPublishedAt != null -> "Last synced " + DateUtils.getRelativeTimeSpanString(
-                    share.lastPublishedAt, System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS
-                )
-                else -> "Not published yet."
+
+            TextButton(onClick = { showServer = !showServer }, modifier = Modifier.heightIn(min = 48.dp)) {
+                Icon(if (showServer) Icons.Default.ExpandLess else Icons.Default.ExpandMore, contentDescription = null)
+                Spacer(Modifier.size(6.dp))
+                Text(if (share.hasGitHub) "Your own server (used only without GitHub)" else "Your own server (optional)")
             }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (share.isPublishing) {
-                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                    Spacer(Modifier.size(8.dp))
-                }
-                Text(
-                    status,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = if (share.lastError != null && !share.isPublishing) MaterialTheme.colorScheme.error
-                    else MaterialTheme.colorScheme.onSurfaceVariant
+            if (showServer) {
+                OutlinedTextField(
+                    value = server,
+                    onValueChange = { server = it },
+                    label = { Text("Server address") },
+                    placeholder = { Text("https://your-pc.tailnet.ts.net:10000") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = serverToken,
+                    onValueChange = { serverToken = it },
+                    label = { Text("Server token") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth()
                 )
             }
+
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
                 OutlinedButton(
-                    onClick = { onSave(url, token, true) },
-                    enabled = dirty && url.isNotBlank() && token.isNotBlank(),
+                    onClick = { onSave(repo, repoToken, server, serverToken, true) },
+                    enabled = dirty,
                     modifier = Modifier.weight(1f).heightIn(min = 48.dp)
                 ) { Text("Save") }
                 Button(
                     onClick = {
-                        if (dirty) onSave(url, token, true)
+                        if (dirty) onSave(repo, repoToken, server, serverToken, true)
                         onPublishNow()
                     },
-                    enabled = url.isNotBlank() && token.isNotBlank() && !share.isPublishing,
+                    enabled = canPublish && !share.isPublishing,
                     modifier = Modifier.weight(1f).heightIn(min = 48.dp)
                 ) { Text("Publish now") }
             }
-            if (share.serverUrl.isNotBlank()) {
+            if (share.isConfigured && share.viewUrl.isNotBlank()) {
                 OutlinedButton(
                     onClick = { openProductPage(context, share.viewUrl) },
                     modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
                 ) { Text("Open the web app") }
             }
         }
+    }
+}
+
+@Composable
+private fun StatusRow(share: WebShareState, now: Long) {
+    val error = share.status == WebShareState.Status.ERROR
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        if (share.isPublishing) {
+            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+        } else {
+            Icon(
+                when (share.status) {
+                    WebShareState.Status.LIVE -> Icons.Default.CloudDone
+                    WebShareState.Status.WAITING -> Icons.Default.CloudQueue
+                    WebShareState.Status.ERROR -> Icons.Default.ErrorOutline
+                    else -> Icons.Default.CloudOff
+                },
+                contentDescription = null,
+                tint = if (error) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+        Spacer(Modifier.size(10.dp))
+        Text(
+            shareStatusText(share, now),
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = if (error) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
+        )
     }
 }

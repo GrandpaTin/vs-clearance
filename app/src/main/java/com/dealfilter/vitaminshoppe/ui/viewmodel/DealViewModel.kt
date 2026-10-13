@@ -5,6 +5,8 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.Network
 import android.os.Build
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -29,6 +31,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -41,9 +44,10 @@ import kotlinx.coroutines.withContext
 class DealViewModel(application: Application) : AndroidViewModel(application), DealActions {
 
     private val session: WebSession = (application as VitaminShoppeApp).webSession
-    private val repository = DealRepository(session)
+    private val repository = DealRepository((application as VitaminShoppeApp).fetcher)
     private val local = LocalStore(application)
     private val publisher = (application as VitaminShoppeApp).webPublisher
+    private val updater = (application as VitaminShoppeApp).updater
 
     private val _uiState = MutableStateFlow(DealUiState())
     val uiState: StateFlow<DealUiState> = _uiState.asStateFlow()
@@ -66,13 +70,32 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
     /** Last good shelf stock, carried into the cache so a refresh can't erase it before new stock arrives. */
     private var lastStock: Pair<String, Map<String, Int>>? = null
 
-    init {
-        viewModelScope.launch {
-            restoreSavedState()
-            refresh()
+    private val restoreJob: Job
+
+    /** Visible to the user right now (between the Activity's onStart and onStop). */
+    private var inForeground = false
+
+    /** Automatic retries after a failed refresh, spaced out so a struggling site isn't hammered. */
+    private var autoRetryJob: Job? = null
+    private var autoFailures = 0
+
+    /** When the user closed the site's check; automatic refreshes leave them alone for a while after. */
+    private var verificationDeclinedAt = 0L
+
+    private val connectivity = application.getSystemService(ConnectivityManager::class.java)
+    private val networkCallback = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) {
+            viewModelScope.launch { onNetworkAvailable() }
         }
+    }
+
+    init {
+        restoreJob = viewModelScope.launch { restoreSavedState() }
         viewModelScope.launch {
             publisher.state.collect { share -> _uiState.update { it.copy(webShare = share) } }
+        }
+        viewModelScope.launch {
+            updater.state.collect { u -> _uiState.update { it.copy(update = u) } }
         }
         viewModelScope.launch {
             var wasVisible = false
@@ -81,6 +104,63 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
                 if (wasVisible && !visible) runPendingAfterVerification()
                 wasVisible = visible
             }
+        }
+        runCatching { connectivity?.registerDefaultNetworkCallback(networkCallback) }
+    }
+
+    override fun onCleared() {
+        runCatching { connectivity?.unregisterNetworkCallback(networkCallback) }
+        super.onCleared()
+    }
+
+    // -------------------------------------------------------------------------------------------
+    // Keeping the list fresh
+    // -------------------------------------------------------------------------------------------
+
+    /** The app came into view: refresh if the list is missing or older than [STALE_AFTER_MS]. */
+    fun onAppForeground() {
+        inForeground = true
+        updater.onReturnedToApp()
+        viewModelScope.launch {
+            restoreJob.join()
+            if (isRefreshDue(System.currentTimeMillis())) refreshInternal(auto = true)
+        }
+        // At most once a day; quiet unless there's something new.
+        viewModelScope.launch { updater.check() }
+    }
+
+    fun onAppBackground() {
+        inForeground = false
+        autoRetryJob?.cancel()
+    }
+
+    internal fun isRefreshDue(now: Long): Boolean {
+        val s = _uiState.value
+        if (loadJob?.isActive == true || s.isVerificationVisible) return false
+        if (now - verificationDeclinedAt < STALE_AFTER_MS) return false
+        // The last attempt failed (offline, site error): try again however recent the list is.
+        if (s.loadError != null) return true
+        val updated = s.lastUpdatedMillis ?: return true
+        return now - updated >= STALE_AFTER_MS
+    }
+
+    private suspend fun onNetworkAvailable() {
+        // Let the new connection settle; the first requests on a just-joined network often fail.
+        delay(1_500)
+        val s = _uiState.value
+        if (inForeground && (s.loadErrorIsOffline || isRefreshDue(System.currentTimeMillis()))) refreshInternal(auto = true)
+        // A list that couldn't be shared earlier goes out now (a refresh above publishes it anyway).
+        val share = publisher.state.value
+        if (share.pending && share.enabled && loadJob?.isActive != true) publishCurrent(announce = false)
+    }
+
+    private fun scheduleAutoRetry() {
+        if (!inForeground || autoFailures >= RETRY_DELAYS_MS.size) return
+        val wait = RETRY_DELAYS_MS[autoFailures++]
+        autoRetryJob?.cancel()
+        autoRetryJob = viewModelScope.launch {
+            delay(wait)
+            if (inForeground && _uiState.value.loadError != null) refreshInternal(auto = true)
         }
     }
 
@@ -106,7 +186,9 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
                 allDeals = items,
                 lastUpdatedMillis = cache?.savedAtMillis,
                 changes = ListChanges(cache?.newIds.orEmpty(), cache?.priceDrops.orEmpty()),
-                isShowingSavedData = items.isNotEmpty()
+                isShowingSavedData = items.isNotEmpty(),
+                // With a saved list there's something to show; with none, the first refresh is coming.
+                status = if (items.isEmpty()) LoadStatus.LOADING else LoadStatus.IDLE
             ).withDerived()
         }
     }
@@ -115,7 +197,15 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
     // Loading
     // -------------------------------------------------------------------------------------------
 
+    /** The user asked: start over on retries and forget an earlier "not now" on the site's check. */
     override fun refresh() {
+        autoFailures = 0
+        autoRetryJob?.cancel()
+        verificationDeclinedAt = 0L
+        refreshInternal(auto = false)
+    }
+
+    private fun refreshInternal(auto: Boolean) {
         if (loadJob?.isActive == true) return
         loadJob = viewModelScope.launch {
             _uiState.update {
@@ -144,9 +234,11 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
                         status = LoadStatus.IDLE,
                         lastUpdatedMillis = now,
                         isShowingSavedData = false,
+                        needsVerification = false,
                         stockError = null
                     ).withDerived()
                 }
+                autoFailures = 0
                 // Save the fresh list now, keeping the last good stock for the same store until
                 // the new stock check finishes (it may fail or the app may be killed meanwhile).
                 val store = _uiState.value.selectedStore
@@ -155,14 +247,17 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
             } catch (e: CancellationException) {
                 throw e
             } catch (e: FetchException.VerificationRequired) {
-                afterVerification["refresh"] = { refresh() }
-                _uiState.update { it.copy(status = LoadStatus.IDLE, loadError = e.message) }
+                afterVerification["refresh"] = { refreshInternal(auto = false) }
+                _uiState.update { it.copy(status = LoadStatus.IDLE, loadError = e.message, needsVerification = true) }
             } catch (e: FetchException) {
                 _uiState.update {
                     it.copy(status = LoadStatus.IDLE, loadError = e.message, loadErrorIsOffline = e is FetchException.Offline)
                 }
+                // Offline waits for the network to come back instead of a timer.
+                if (e !is FetchException.Offline) scheduleAutoRetry()
             } catch (e: Exception) {
                 _uiState.update { it.copy(status = LoadStatus.IDLE, loadError = "Something went wrong loading deals. Please try again.") }
+                scheduleAutoRetry()
             }
         }
     }
@@ -231,6 +326,7 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
             }
         }
         // Every saved list (fresh deals, then shelf stock) also goes to the user's web server if enabled.
+        // Never awaited: sharing must not slow the list down, and its failures stay in the sheet.
         if (publisher.state.value.enabled && publisher.state.value.isConfigured) {
             val store = _uiState.value.selectedStore
             viewModelScope.launch { publisher.publish(items, savedAt, store, stockStoreId, stock) }
@@ -250,7 +346,8 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
 
     fun closeWebShare() = _uiState.update { it.copy(isWebShareOpen = false) }
 
-    fun saveWebShare(url: String, token: String, enabled: Boolean) = publisher.configure(url, token, enabled)
+    fun saveWebShare(gitHubRepo: String, gitHubToken: String, serverUrl: String, serverToken: String, enabled: Boolean) =
+        publisher.configure(gitHubRepo, gitHubToken, serverUrl, serverToken, enabled)
 
     fun setWebShareEnabled(enabled: Boolean) {
         publisher.setEnabled(enabled)
@@ -258,10 +355,12 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
     }
 
     /** Publishes what's on screen now (deals + current shelf stock). */
-    fun publishNow() {
+    fun publishNow() = publishCurrent(announce = true)
+
+    private fun publishCurrent(announce: Boolean) {
         val s = _uiState.value
         if (s.allDeals.isEmpty()) {
-            showMessage("Nothing to publish yet — wait for the deals to load.")
+            if (announce) showMessage("Nothing to publish yet — wait for the deals to load.")
             return
         }
         val stock = s.selectedStore?.let { store ->
@@ -273,8 +372,15 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
                 s.allDeals.map { it.copy(storeQuantity = null) }, s.lastUpdatedMillis ?: System.currentTimeMillis(),
                 s.selectedStore, stock?.first, stock?.second ?: emptyMap()
             )
-            showMessage(error ?: if (publisher.state.value.isGitHub) "Published ${s.allDeals.size} deals — live on the site in about a minute"
-                else "Published ${s.allDeals.size} deals to the web app")
+            if (!announce) return@launch
+            showMessage(
+                when {
+                    publisher.state.value.pending -> "Saved for later — it will sync when online"
+                    error != null -> error
+                    publisher.state.value.isGitHub -> "Published ${s.allDeals.size} deals — live on the site in about a minute"
+                    else -> "Published ${s.allDeals.size} deals to the web app"
+                }
+            )
         }
     }
 
@@ -455,9 +561,10 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
         session.dismissChallenge()
     }
 
-    /** User closed the sheet; don't retry behind their back. */
+    /** User closed the sheet; don't retry behind their back (the banner keeps a Verify button). */
     fun cancelVerification() {
         afterVerification.clear()
+        verificationDeclinedAt = System.currentTimeMillis()
         session.dismissChallenge()
     }
 
@@ -509,11 +616,43 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
 
     // -------------------------------------------------------------------------------------------
 
+    // -------------------------------------------------------------------------------------------
+    // App updates
+    // -------------------------------------------------------------------------------------------
+
+    override fun checkForUpdates() {
+        viewModelScope.launch {
+            val message = updater.check(force = true)
+            if (message != null) showMessage(message) else if (updater.state.value.available != null) updater.openDialog()
+        }
+    }
+
+    override fun openUpdate() = updater.openDialog()
+
+    fun startUpdate() {
+        viewModelScope.launch { updater.downloadAndInstall() }
+    }
+
+    fun laterUpdate() = updater.dismiss()
+
+    fun closeUpdate() = updater.closeDialog()
+
+    fun openInstallPermission(context: Context) {
+        try {
+            context.startActivity(updater.installPermissionIntent())
+        } catch (e: Exception) {
+            showMessage("Open Settings › Apps › VS Clearance › Install unknown apps, and allow it.")
+        }
+    }
+
     override fun showMessage(text: String) = _uiState.update { it.copy(message = text) }
 
     override fun clearMessage() = _uiState.update { it.copy(message = null) }
 
     companion object {
+        /** Waits before the 1st, 2nd and 3rd automatic retry of a failed refresh. */
+        private val RETRY_DELAYS_MS = longArrayOf(30_000L, 2 * 60_000L, 10 * 60_000L)
+
         /** Returns a user-facing problem with the store query, or null when it's searchable. */
         fun validateStoreQuery(query: String): String? = when {
             query.isBlank() -> "Enter a ZIP code or city to find stores."

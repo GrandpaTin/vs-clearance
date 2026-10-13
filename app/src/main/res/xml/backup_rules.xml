@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <full-backup-content>
     <include domain="sharedpref" path="."/>
+    <!-- Publish tokens stay on this phone, never in a cloud backup. -->
+    <exclude domain="sharedpref" path="vs_web_share.xml"/>
 </full-backup-content>

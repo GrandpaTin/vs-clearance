@@ -38,8 +38,9 @@ object DealFilters {
     }
 
     private fun passesAvailability(item: DealItem, c: FilterCriteria): Boolean = when (c.mode) {
-        // Pickup means "on the shelf at my store right now".
-        FulfillmentMode.PICKUP -> item.isPickupEligible && item.isInStockAtStore
+        // Pickup means "on the shelf at my store right now" — including walk-in-only stock, which the
+        // card labels, so nothing on the shelf is hidden (same rule as the web app).
+        FulfillmentMode.PICKUP -> item.isInStockAtStore
         FulfillmentMode.SHIP -> !c.inStockOnly || !item.isOutOfStockOnline
     }
 

@@ -15,12 +15,15 @@ execFileSync(process.execPath, [path.join(web, 'scripts', 'build-userscript.mjs'
 fs.copyFileSync(path.join(project, 'LICENSE'), path.join(web, 'public', 'LICENSE.txt'));
 
 // Never the 'owner' build: that one carries your server's publish token.
-const apk = path.join(project, 'app', 'build', 'outputs', 'apk', 'everyone', 'debug', 'app-everyone-debug.apk');
+// The signed release build when there is one (it updates in-app), else the debug build.
+const apk = [['release', 'app-everyone-release.apk'], ['debug', 'app-everyone-debug.apk']]
+  .map(([type, name]) => path.join(project, 'app', 'build', 'outputs', 'apk', 'everyone', type, name))
+  .find((f) => fs.existsSync(f)) || '';
 if (fs.existsSync(apk)) {
   fs.copyFileSync(apk, path.join(downloads, 'VS-Clearance.apk'));
   console.log('copied VS-Clearance.apk');
 } else {
-  console.log('no everyone APK yet: run gradlew assembleEveryoneDebug');
+  console.log('no everyone APK yet: run gradlew assembleEveryoneRelease');
 }
 
 // The zip is exactly the project's source as git sees it (tracked + new, minus .gitignore), so it

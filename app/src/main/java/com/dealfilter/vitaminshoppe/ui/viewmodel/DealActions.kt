@@ -33,4 +33,6 @@ interface DealActions {
     fun sharePrompt(context: Context)
     fun showMessage(text: String)
     fun clearMessage()
+    fun checkForUpdates() {}
+    fun openUpdate() {}
 }

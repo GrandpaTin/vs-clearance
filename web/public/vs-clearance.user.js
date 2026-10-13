@@ -357,6 +357,14 @@ function storeAddress(s) {
   return [street, `${s.city}, ${s.state} ${s.zip}`.trim()].filter(Boolean).join(', ');
 }
 
+/**
+ * Since October 2026 the search API answers its clearance path with HTTP 404 while still returning
+ * the full listing. A 404 that carries products is a real answer; one without them is an error.
+ */
+function isListingDespiteStatus(status, data) {
+  return status === 404 && Array.isArray(data?.response?.products) && data.response.products.length > 0;
+}
+
 function relativeTime(ms, now = Date.now()) {
   const s = Math.max(0, Math.round((now - ms) / 1000));
   if (s < 60) return 'just now';
@@ -485,8 +493,14 @@ function todaysHours(lines, date = new Date()) {
       throw new Error(navigator.onLine === false ? "You're offline." : "Couldn't reach vitaminshoppe.com.");
     }
     if (res.status === 403) throw new Blocked('Vitamin Shoppe wants to confirm you\'re not a bot.');
-    if (!res.ok) throw new Error(`Vitamin Shoppe answered ${res.status}.`);
-    try { return await res.json(); } catch { throw new Blocked('Vitamin Shoppe sent a check page instead of data.'); }
+    if (!res.ok && res.status !== 404) throw new Error(`Vitamin Shoppe answered ${res.status}.`);
+    let data;
+    try { data = await res.json(); } catch {
+      if (!res.ok) throw new Error(`Vitamin Shoppe answered ${res.status}.`);
+      throw new Blocked('Vitamin Shoppe sent a check page instead of data.');
+    }
+    if (!res.ok && !isListingDespiteStatus(res.status, data)) throw new Error(`Vitamin Shoppe answered ${res.status}.`);
+    return data;
   }
 
   // ------------------------------------------------------------------- state

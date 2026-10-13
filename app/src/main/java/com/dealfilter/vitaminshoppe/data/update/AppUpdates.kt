@@ -1,0 +1,278 @@
+package com.dealfilter.vitaminshoppe.data.update
+
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageInfo
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
+import android.provider.Settings
+import androidx.core.content.FileProvider
+import com.dealfilter.vitaminshoppe.BuildConfig
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
+import java.io.File
+import java.io.IOException
+import java.net.HttpURLConnection
+import java.net.URL
+
+/** A published version of the app, from GitHub Releases. */
+data class AppRelease(
+    val versionCode: Int,
+    val versionName: String,
+    val notes: String,
+    val apkUrl: String,
+    val apkBytes: Long,
+    val pageUrl: String
+)
+
+/** Everything the update banner and dialog show. */
+data class UpdateState(
+    val available: AppRelease? = null,
+    val isChecking: Boolean = false,
+    /** 0..1 while downloading, null otherwise. */
+    val progress: Float? = null,
+    val readyToInstall: Boolean = false,
+    /** Android needs the one-time "install unknown apps" permission for this app first. */
+    val needsInstallPermission: Boolean = false,
+    val error: String? = null,
+    /** The user tapped "Later" on this version; don't show the banner for it again. */
+    val dismissed: Boolean = false,
+    val isDialogOpen: Boolean = false
+) {
+    val showBanner: Boolean get() = available != null && !dismissed && !isDialogOpen
+}
+
+/**
+ * Checks GitHub Releases for a newer build, downloads it inside the app and hands it to Android's
+ * installer. Android itself only installs an update signed with the same key as the installed app,
+ * and the file is checked against that before the installer is opened.
+ */
+open class AppUpdater(
+    private val context: Context,
+    private val currentVersionCode: Int = BuildConfig.VERSION_CODE,
+    private val latestUrl: String = LATEST_RELEASE_URL
+) {
+    private val prefs = context.getSharedPreferences("vs_updates", Context.MODE_PRIVATE)
+    private val lock = Mutex()
+    private val _state = MutableStateFlow(UpdateState())
+    val state: StateFlow<UpdateState> = _state.asStateFlow()
+
+    private val apkFile: File get() = File(File(context.cacheDir, "updates").apply { mkdirs() }, "VS-Clearance-update.apk")
+
+    /** Daily at most, unless [force] (the "Check for updates" menu item). Returns a message for a manual check. */
+    suspend fun check(force: Boolean = false): String? = lock.withLock {
+        val now = System.currentTimeMillis()
+        if (!force && now - prefs.getLong(K_CHECKED, 0L) < DAY_MS) return@withLock null
+        _state.update { it.copy(isChecking = true, error = null) }
+        val result = withContext(Dispatchers.IO) { runCatching { fetchLatest() } }
+        prefs.edit().putLong(K_CHECKED, now).apply()
+        val release = result.getOrNull()
+        val newer = release?.takeIf { it.versionCode > currentVersionCode }
+        val dismissedCode = prefs.getInt(K_DISMISSED, 0)
+        _state.update {
+            it.copy(
+                isChecking = false,
+                available = newer,
+                dismissed = newer != null && !force && newer.versionCode == dismissedCode,
+                readyToInstall = newer != null && it.readyToInstall && it.available?.versionCode == newer.versionCode
+            )
+        }
+        when {
+            result.isFailure -> if (result.exceptionOrNull() is IOException) "Couldn't check for updates — you're offline." else "Couldn't check for updates right now."
+            newer != null -> null // the banner / dialog says it
+            else -> "You're up to date (version ${BuildConfig.VERSION_NAME})."
+        }
+    }
+
+    fun openDialog() = _state.update { it.copy(isDialogOpen = true, error = null) }
+
+    /** "Later": hide this version's banner until a newer one or a manual check. */
+    fun dismiss() {
+        _state.value.available?.let { prefs.edit().putInt(K_DISMISSED, it.versionCode).apply() }
+        _state.update { it.copy(isDialogOpen = false, dismissed = true) }
+    }
+
+    /** Downloads (if needed), verifies, then opens Android's installer. */
+    suspend fun downloadAndInstall() {
+        val release = _state.value.available ?: return
+        if (!_state.value.readyToInstall) {
+            _state.update { it.copy(progress = 0f, error = null, needsInstallPermission = false) }
+            val error = withContext(Dispatchers.IO) { download(release) }
+            if (error != null) {
+                _state.update { it.copy(progress = null, error = error) }
+                return
+            }
+            _state.update { it.copy(progress = null, readyToInstall = true) }
+        }
+        install()
+    }
+
+    /** Opens the installer for an already downloaded file, or explains the permission it needs. */
+    fun install() {
+        if (!canInstall()) {
+            _state.update { it.copy(needsInstallPermission = true) }
+            return
+        }
+        val uri = FileProvider.getUriForFile(context, context.packageName + ".updates", apkFile)
+        val intent = Intent(Intent.ACTION_VIEW)
+            .setDataAndType(uri, "application/vnd.android.package-archive")
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+        try {
+            context.startActivity(intent)
+            _state.update { it.copy(needsInstallPermission = false, error = null) }
+        } catch (e: Exception) {
+            _state.update { it.copy(error = "Android couldn't open its installer. Download it from the website instead.") }
+        }
+    }
+
+    /** The settings page where Android grants "install unknown apps" to this app. */
+    fun installPermissionIntent(): Intent =
+        Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + context.packageName))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+
+    /** Back from Settings: carry on if the permission was granted. */
+    fun onReturnedToApp() {
+        val s = _state.value
+        if (s.needsInstallPermission && s.readyToInstall && canInstall()) install()
+    }
+
+    fun closeDialog() = _state.update { it.copy(isDialogOpen = false) }
+
+    open fun canInstall(): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.O || context.packageManager.canRequestPackageInstalls()
+
+    private fun fetchLatest(): AppRelease? {
+        val conn = (URL(latestUrl).openConnection() as HttpURLConnection).apply {
+            connectTimeout = 10_000
+            readTimeout = 15_000
+            setRequestProperty("Accept", "application/vnd.github+json")
+            setRequestProperty("User-Agent", "VS-Clearance-Android")
+        }
+        try {
+            if (conn.responseCode == 404) return null // no release published yet
+            if (conn.responseCode !in 200..299) throw IllegalStateException("HTTP ${conn.responseCode}")
+            return parseRelease(conn.inputStream.bufferedReader().use { it.readText() })
+        } finally {
+            conn.disconnect()
+        }
+    }
+
+    private fun download(release: AppRelease): String? {
+        val target = apkFile
+        val partial = File(target.parentFile, target.name + ".part")
+        try {
+            val conn = (URL(release.apkUrl).openConnection() as HttpURLConnection).apply {
+                connectTimeout = 15_000
+                readTimeout = 30_000
+                instanceFollowRedirects = true
+                setRequestProperty("User-Agent", "VS-Clearance-Android")
+            }
+            try {
+                if (conn.responseCode !in 200..299) return "The download failed (error ${conn.responseCode}). Try again in a minute."
+                val total = conn.contentLengthLong.takeIf { it > 0 } ?: release.apkBytes
+                conn.inputStream.use { input ->
+                    partial.outputStream().use { out ->
+                        val buf = ByteArray(64 * 1024)
+                        var done = 0L
+                        var lastShown = 0f
+                        while (true) {
+                            val n = input.read(buf)
+                            if (n < 0) break
+                            out.write(buf, 0, n)
+                            done += n
+                            if (total > 0) {
+                                val p = (done.toFloat() / total).coerceIn(0f, 1f)
+                                if (p - lastShown >= 0.02f) { lastShown = p; _state.update { it.copy(progress = p) } }
+                            }
+                        }
+                    }
+                }
+            } finally {
+                conn.disconnect()
+            }
+            verifyMatchesInstalledApp(partial, release)?.let { partial.delete(); return it }
+            if (!partial.renameTo(target)) {
+                target.delete()
+                if (!partial.renameTo(target)) return "Couldn't save the update. Free up some space and try again."
+            }
+            return null
+        } catch (e: IOException) {
+            partial.delete()
+            return "The download stopped — check your connection and try again."
+        }
+    }
+
+    /** Same app, newer version, signed with the same key: anything else would fail to install anyway. */
+    private fun verifyMatchesInstalledApp(apk: File, release: AppRelease): String? {
+        val pm = context.packageManager
+        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) PackageManager.GET_SIGNING_CERTIFICATES else @Suppress("DEPRECATION") PackageManager.GET_SIGNATURES
+        val downloaded = pm.getPackageArchiveInfo(apk.path, flags) ?: return "The downloaded file isn't a valid app. Try again."
+        if (downloaded.packageName != context.packageName) return "The download wasn't VS Clearance."
+        @Suppress("DEPRECATION")
+        val code = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) downloaded.longVersionCode.toInt() else downloaded.versionCode
+        if (code <= currentVersionCode) return "That download isn't newer than this app."
+        val installed = pm.getPackageInfo(context.packageName, flags)
+        if (signers(downloaded) != signers(installed)) {
+            return "This update is signed with a different key than the app on your phone. " +
+                "Uninstall VS Clearance once and install it from ${release.pageUrl} — updates work in-app after that."
+        }
+        return null
+    }
+
+    private fun signers(info: PackageInfo): Set<String> =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            info.signingInfo?.apkContentsSigners.orEmpty().map { it.toCharsString() }.toSet()
+        } else {
+            @Suppress("DEPRECATION")
+            info.signatures.orEmpty().map { it.toCharsString() }.toSet()
+        }
+
+    companion object {
+        const val LATEST_RELEASE_URL = "https://api.github.com/repos/GrandpaTin/vs-clearance/releases/latest"
+        const val APK_NAME = "VS-Clearance.apk"
+        private const val K_CHECKED = "checked"
+        private const val K_DISMISSED = "dismissed"
+        private const val DAY_MS = 24 * 3600_000L
+
+        private val VERSION_CODE = Regex("""versionCode:\s*(\d+)""")
+        private val HIDDEN = Regex("""<!--.*?-->""", RegexOption.DOT_MATCHES_ALL)
+
+        /**
+         * Reads GitHub's "latest release" JSON. The release notes carry the build number in a hidden
+         * comment (`<!-- versionCode: 26101318 -->`, written by scripts/release.mjs); the APK is the
+         * asset named [APK_NAME]. Anything else (a draft, a missing APK) is ignored.
+         */
+        fun parseRelease(json: String): AppRelease? {
+            val o = JSONObject(json)
+            if (o.optBoolean("draft") || o.optBoolean("prerelease")) return null
+            val body = o.optString("body")
+            val code = VERSION_CODE.find(body)?.groupValues?.get(1)?.toIntOrNull() ?: return null
+            val assets = o.optJSONArray("assets") ?: return null
+            var url: String? = null
+            var size = 0L
+            for (i in 0 until assets.length()) {
+                val a = assets.optJSONObject(i) ?: continue
+                if (a.optString("name") == APK_NAME) {
+                    url = a.optString("browser_download_url").takeIf { it.startsWith("https://") }
+                    size = a.optLong("size")
+                }
+            }
+            return AppRelease(
+                versionCode = code,
+                versionName = o.optString("tag_name").removePrefix("v").ifBlank { code.toString() },
+                notes = body.replace(HIDDEN, "").trim(),
+                apkUrl = url ?: return null,
+                apkBytes = size,
+                pageUrl = o.optString("html_url").ifBlank { "https://github.com/GrandpaTin/vs-clearance/releases/latest" }
+            )
+        }
+    }
+}

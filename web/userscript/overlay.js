@@ -4,7 +4,7 @@
 import {
   SORTS, FLOORS, AI_MAX_ITEMS, normalizeItem, cartEstimate, bestPrice, discount, autoDeliveryDeal, money, facts,
   applyFilters, topCategories, changes, prune, aiPrompt, storeAddress, relativeTime, clearanceUrl, storeSearchUrl,
-  inventoryUrl, parseClearancePage, parseStores, parseInventory, todaysHours
+  inventoryUrl, parseClearancePage, parseStores, parseInventory, todaysHours, isListingDespiteStatus
 } from '../public/core.js';
 
 /* global __VSX_CSS__ */
@@ -27,8 +27,14 @@ import {
       throw new Error(navigator.onLine === false ? "You're offline." : "Couldn't reach vitaminshoppe.com.");
     }
     if (res.status === 403) throw new Blocked('Vitamin Shoppe wants to confirm you\'re not a bot.');
-    if (!res.ok) throw new Error(`Vitamin Shoppe answered ${res.status}.`);
-    try { return await res.json(); } catch { throw new Blocked('Vitamin Shoppe sent a check page instead of data.'); }
+    if (!res.ok && res.status !== 404) throw new Error(`Vitamin Shoppe answered ${res.status}.`);
+    let data;
+    try { data = await res.json(); } catch {
+      if (!res.ok) throw new Error(`Vitamin Shoppe answered ${res.status}.`);
+      throw new Blocked('Vitamin Shoppe sent a check page instead of data.');
+    }
+    if (!res.ok && !isListingDespiteStatus(res.status, data)) throw new Error(`Vitamin Shoppe answered ${res.status}.`);
+    return data;
   }
 
   // ------------------------------------------------------------------- state

@@ -2,5 +2,7 @@
 <data-extraction-rules>
     <cloud-backup>
         <include domain="sharedpref" path="."/>
+        <!-- Publish tokens stay on this phone, never in a cloud backup. -->
+        <exclude domain="sharedpref" path="vs_web_share.xml"/>
     </cloud-backup>
 </data-extraction-rules>
