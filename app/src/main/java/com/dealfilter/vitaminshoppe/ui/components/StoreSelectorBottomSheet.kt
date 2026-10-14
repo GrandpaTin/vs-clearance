@@ -222,7 +222,11 @@ private fun StoreRow(store: StoreLocation, isSelected: Boolean, onSelect: (Store
                     Text(store.formattedDistance, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
                 }
                 store.phone?.let { phone ->
-                    IconButton(onClick = { dialStore(context, phone) }) {
+                    IconButton(onClick = {
+                        if (!dialStore(context, phone)) {
+                            android.widget.Toast.makeText(context, "Call ${store.name} at $phone", android.widget.Toast.LENGTH_LONG).show()
+                        }
+                    }) {
                         Icon(Icons.Default.Phone, contentDescription = "Call ${store.name} at $phone", tint = MaterialTheme.colorScheme.primary)
                     }
                 }

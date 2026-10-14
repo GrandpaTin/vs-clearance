@@ -91,7 +91,10 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
     private var lastFailureAt = 0L
 
     /** The last refresh's list looked broken (far too short) and was kept out; the user can insist. */
-    private var rejectedShrink = false
+    private var shortRejected = false
+
+    /** The user chose "Load anyway" on the short-list banner: the next refresh takes what comes back. */
+    private var acceptShortOnce = false
 
     /** Keeps an on-screen list fresh while the app stays open (e.g. propped up in the store). */
     private var freshnessJob: Job? = null
@@ -169,7 +172,9 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
         updater.onReturnedToApp()
         viewModelScope.launch {
             restoreJob.join()
-            if (isRefreshDue(System.currentTimeMillis())) refreshInternal(auto = true)
+            // Nothing saved yet: opening the app is the user asking, so a check the site wants is shown now.
+            val firstEver = !_uiState.value.hasData && _uiState.value.lastUpdatedMillis == null
+            if (isRefreshDue(System.currentTimeMillis())) refreshInternal(auto = !firstEver)
             else {
                 retryStockIfFailed()
                 if (publisher.state.value.pending) shareIfOn()
@@ -281,6 +286,12 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
     // -------------------------------------------------------------------------------------------
 
     /** The user asked: start over on retries and forget an earlier "not now" on the site's check. */
+    /** "Load anyway" on the short-list banner: accept the shorter list this time. */
+    override fun loadShortListAnyway() {
+        acceptShortOnce = true
+        refresh()
+    }
+
     override fun refresh() {
         // A background refresh is already running: if it ends needing the site's check, run the user's own
         // refresh right after so the real check is shown (a quiet run never shows it).
@@ -321,11 +332,12 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
                 // If the count itself is missing (0), a second refresh by the user takes the list anyway.
                 val reported = repository.lastReportedTotal
                 val suspicious = before >= 20 && fetched.size < before / 5 && (reported == 0 || fetched.size < reported * 0.8)
-                if (suspicious && !(auto == false && rejectedShrink)) {
-                    rejectedShrink = true
-                    throw FetchException.BadData("Vitamin Shoppe's list came back nearly empty — keeping your saved deals. Refresh again to load it anyway.")
+                val accept = acceptShortOnce
+                acceptShortOnce = false
+                if (suspicious && !accept) {
+                    shortRejected = true
+                    throw FetchException.BadData("Vitamin Shoppe's list came back much shorter than usual — keeping your saved deals.")
                 }
-                rejectedShrink = false
                 val now = System.currentTimeMillis()
                 // Show the last known shelf stock right away (new SKUs stay "unknown") so pickup
                 // mode doesn't empty out while the fresh stock check runs.
@@ -344,6 +356,7 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
                         lastUpdatedMillis = now,
                         isShowingSavedData = false,
                         needsVerification = false,
+                        shortListPending = false,
                         loadError = null,
                         loadErrorIsOffline = false,
                         stockError = null
@@ -379,8 +392,10 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
                 _uiState.update { it.copy(status = LoadStatus.IDLE, loadError = e.message, loadErrorIsOffline = false, needsVerification = true) }
             } catch (e: FetchException) {
                 userWaiting = false
+                val short = shortRejected
+                shortRejected = false
                 _uiState.update {
-                    it.copy(status = LoadStatus.IDLE, loadError = e.message, loadErrorIsOffline = e is FetchException.Offline)
+                    it.copy(status = LoadStatus.IDLE, loadError = e.message, loadErrorIsOffline = e is FetchException.Offline, shortListPending = short)
                 }
                 // Offline waits for the network to come back instead of a timer.
                 if (e !is FetchException.Offline) { lastFailureAt = System.currentTimeMillis(); scheduleAutoRetry() }
@@ -589,7 +604,7 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
     override fun onQueryChange(query: String) = updateFilters { it.copy(query = query.take(80)) }
 
     override fun onCategoryToggle(category: String) =
-        updateFilters { it.copy(category = if (it.category == category) null else category) }
+        updateFilters { it.copy(category = if (it.category.equals(category, true)) null else category) }
 
     override fun onDiscountFloor(floor: DiscountFloor) = updateFilters { it.copy(discountFloor = floor) }
 
@@ -621,7 +636,7 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
 
     private fun DealUiState.withDerived(): DealUiState {
         // A category that vanished after a refresh would otherwise hide everything.
-        val validCategory = category?.takeIf { c -> allDeals.isEmpty() || allDeals.any { it.category.equals(c, true) } }
+        val validCategory = category?.let { c -> if (allDeals.isEmpty()) c else allDeals.firstOrNull { it.category.equals(c, true) }?.category }
         if (category != null && validCategory == null && restored) categoryDropped = true
         val base = copy(category = validCategory)
         return base.copy(

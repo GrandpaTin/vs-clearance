@@ -30,7 +30,9 @@
       var shown = document.getElementById('share-url');
       var sel = window.getSelection && window.getSelection();
       if (shown && sel) { sel.selectAllChildren(shown); shown.scrollIntoView({ block: 'center' }); }
-      btn.textContent = 'Link selected — press and hold to copy';
+      btn.textContent = window.matchMedia && matchMedia('(pointer: coarse)').matches
+        ? 'Link selected — press and hold to copy'
+        : 'Link selected — press ' + (/Mac/i.test(navigator.platform) ? '⌘C' : 'Ctrl+C') + ' to copy';
       setTimeout(function () { btn.textContent = label; }, 4000);
     }
   });

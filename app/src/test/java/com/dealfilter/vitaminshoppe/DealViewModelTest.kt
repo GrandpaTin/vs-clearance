@@ -216,7 +216,8 @@ class DealViewModelTest {
         vm.onAppForeground()
         val first = vm.awaitState { it.loadError != null }
         assertTrue("saved list kept", first.allDeals.size >= 20)
-        vm.refresh()
+        assertTrue("offers Load anyway", first.shortListPending)
+        vm.loadShortListAnyway()
         val second = vm.awaitState { it.loadError == null && it.status == LoadStatus.IDLE && it.allDeals.size == 2 }
         assertEquals(2, second.allDeals.size)
     }

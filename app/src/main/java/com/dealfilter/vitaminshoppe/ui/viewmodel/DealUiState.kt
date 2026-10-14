@@ -50,6 +50,8 @@ data class DealUiState(
     val isVerificationVisible: Boolean = false,
     /** The last refresh was stopped by the site's human check and hasn't been completed yet. */
     val needsVerification: Boolean = false,
+    /** The last refresh came back far shorter than the saved list and was kept out ("Load anyway" takes it). */
+    val shortListPending: Boolean = false,
     val webShare: com.dealfilter.vitaminshoppe.data.remote.WebShareState = com.dealfilter.vitaminshoppe.data.remote.WebShareState(),
     val isWebShareOpen: Boolean = false,
     /** A vsdeals://publish link waiting for the user's OK: (url, token). */

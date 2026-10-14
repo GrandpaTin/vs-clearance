@@ -217,7 +217,11 @@ fun DealScreenContent(state: DealUiState, viewModel: DealActions, modifier: Modi
     // Keyed on the indicator turning on: an automatic refresh ending (indicator still on for a frame
     // while status is already IDLE) must not count as a pull.
     LaunchedEffect(pullState.isRefreshing) {
-        if (pullState.isRefreshing && current.status == LoadStatus.IDLE) {
+        if (pullState.isRefreshing && current.status == LoadStatus.LOADING) {
+            // First load already showing its own progress: count the pull as asking, drop the extra spinner.
+            viewModel.refresh()
+            pullState.endRefresh()
+        } else if (pullState.isRefreshing && current.status == LoadStatus.IDLE) {
             viewModel.refresh()
             // If a refresh was already finishing, status may never flip; don't spin forever.
             delay(400)
@@ -741,7 +745,7 @@ private fun Banners(state: DealUiState, viewModel: DealActions) {
                 container = badges.amberContainer,
                 content = badges.onAmberContainer,
                 action = notice.action,
-                onAction = viewModel::refresh
+                onAction = if (state.shortListPending && notice.kind == RefreshNotice.Kind.FAILED) viewModel::loadShortListAnyway else viewModel::refresh
             )
         }
         // In pickup mode with nothing listed, the full-screen state explains this instead.

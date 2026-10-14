@@ -90,6 +90,8 @@ open class AppUpdater(
 
     init {
         val release = _state.value.available
+        // Nothing newer pending (the update was installed): don't keep its download around.
+        if (release == null) scope.launch(Dispatchers.IO) { deleteStaleDownload() }
         if (release != null) scope.launch {
             val ready = withContext(Dispatchers.IO) { apkFile.exists() && verifyMatchesInstalledApp(apkFile, release, exact = true) == null }
             if (ready) _state.update { if (it.available?.versionCode == release.versionCode) it.copy(readyToInstall = true) else it }

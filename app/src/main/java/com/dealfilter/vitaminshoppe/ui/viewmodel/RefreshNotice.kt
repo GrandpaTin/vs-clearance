@@ -27,7 +27,8 @@ fun refreshNotice(s: DealUiState, now: Long): RefreshNotice? {
             RefreshNotice.Kind.OFFLINE, "You're offline", if (recent) "Deals refresh when you reconnect" else "$saved · they'll refresh when you reconnect", "Retry"
         )
         s.loadError != null -> RefreshNotice(
-            RefreshNotice.Kind.FAILED, "Couldn't refresh", if (recent) "${s.loadError.trimEnd('.')}." else "${s.loadError.trimEnd('.')}. $saved.", "Retry"
+            RefreshNotice.Kind.FAILED, "Couldn't refresh", if (recent) "${s.loadError.trimEnd('.')}." else "${s.loadError.trimEnd('.')}. $saved.",
+            if (s.shortListPending) "Load anyway" else "Retry"
         )
         updated != null && (future || now - updated >= STALE_AFTER_MS) -> RefreshNotice(
             RefreshNotice.Kind.STALE, "These prices may be out of date", saved, "Refresh"

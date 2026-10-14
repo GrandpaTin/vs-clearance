@@ -34,5 +34,6 @@ interface DealActions {
     fun showMessage(text: String)
     fun clearMessage()
     fun checkForUpdates() {}
+    fun loadShortListAnyway() {}
     fun openUpdate() {}
 }

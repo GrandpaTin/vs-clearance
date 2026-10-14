@@ -100,7 +100,15 @@ import {
   }
   // Saved store / stock that don't have the expected shape are forgotten rather than trusted.
   const plain = (o) => !!o && typeof o === 'object' && !Array.isArray(o);
-  if (!plain(state.store) || state.store.id == null) { state.store = null; put('store', null); }
+  // Filter preferences: anything unexpected falls back to the default (and is saved that way).
+  const fix = (key, ok, fallback) => { if (!ok(state[key])) { state[key] = fallback; put(key, fallback); } };
+  fix('category', (v) => v === null || (typeof v === 'string' && v !== ''), null);
+  fix('floor', (v) => FLOORS.includes(v), 0);
+  fix('sort', (v) => SORTS.some((o) => o.id === v), 'discount');
+  fix('inStockOnly', (v) => typeof v === 'boolean', true);
+  fix('mode', (v) => v === 'ship' || v === 'pickup', 'ship');
+  // 4. a saved store needs an id and a name (otherwise banners say "at undefined")
+  if (!plain(state.store) || state.store.id == null || typeof state.store.name !== 'string' || !state.store.name.trim()) { state.store = null; put('store', null); }
   if (!plain(state.stock) || !plain(state.stock.map) || !Number.isFinite(state.stock.at) || !state.store || state.stock.storeId !== state.store.id) {
     state.stock = null; put('stock', null);
   }
@@ -183,7 +191,10 @@ import {
   /** One shelf check per store at a time; a second request waits for (and shares) the one running. */
   function loadStock(opts) {
     const id = state.store ? state.store.id : null;
-    if (loadStock.p && loadStock.storeId === id && loadStock.run === stockRun) return loadStock.p;
+    if (loadStock.p && loadStock.storeId === id && loadStock.run === stockRun) {
+      // The running check may predate items just added by a refresh: ask for those once it's done.
+      return loadStock.p.then(() => (hasStock() && !state.stockError && stockHasGaps() ? loadStock({ onlyMissing: true }) : undefined));
+    }
     loadStock.storeId = id;
     const p = loadStockNow(opts).finally(() => { if (loadStock.p === p) loadStock.p = null; });
     loadStock.p = p;
@@ -242,7 +253,7 @@ import {
           ? `Vitamin Shoppe wants to confirm a person is browsing before showing stock at ${store.name}. Reload the page, complete any check, and Deals reopens.`
           : (keep && !keep.partial ? `Couldn't check the ${missing} new item${missing === 1 ? '' : 's'} at ${store.name}. `
             : keep ? `Couldn't check ${missing} of ${state.raw.filter((o) => o.jda).length} items at ${store.name}. `
-            : reached ? `Couldn't check ${missing} of ${total} items at ${store.name}. ` : `Couldn't ${prev ? 're-check' : 'check'} shelf stock at ${store.name}. `) +
+            : reached ? `Couldn't check ${missing} of ${total} items at ${store.name}${state.mode === 'pickup' ? ' (those aren\'t listed until they are)' : ''}. ` : `Couldn't ${prev ? 're-check' : 'check'} shelf stock at ${store.name}. `) +
             `${e.message.replace(/\.?$/, '.')}`;
         state.stockAdvice = connection ? 'Check your connection and try again.' : 'Retry, or it will try again later.';
       }
@@ -430,7 +441,7 @@ import {
 
   function closeApp() {
     state.open = false; app.hidden = true; launcher.hidden = !get('launcher', true);
-    document.documentElement.style.overflow = pageOverflow;
+    if (document.documentElement.style.overflow === 'hidden') document.documentElement.style.overflow = pageOverflow;
     if (!launcher.hidden) launcher.focus({ preventScroll: true });
     if (location.hash === '#vsdeals') history.replaceState(history.state, '', location.pathname + location.search);
   }
@@ -784,7 +795,7 @@ import {
       case 'retry-stock':
         await loadStock({ onlyMissing: gapsOnly() });
         if (!state.stockError && state.store) toast(`Shelf stock updated for ${state.store.name}`);
-        else if (state.stockError && state.store) toast(`Still couldn't check shelf stock at ${state.store.name}`);
+        else if (state.stockError && state.store && !ref('banner').textContent.trim()) toast(`Still couldn't check shelf stock at ${state.store.name}`);
         return;
       case 'reload-page':
         // Back where they were after the check: the store sheet reopens (and searches) if it was open.
@@ -965,7 +976,7 @@ import {
       reopenAfterCheck = reopenAfterCheck || state.open;
       state.open = false; // stops the reconnect / tab-return refreshes too
       host.remove();
-      document.documentElement.style.overflow = pageOverflow;
+      if (document.documentElement.style.overflow === 'hidden') document.documentElement.style.overflow = pageOverflow;
     } else if (!check && !host.isConnected) {
       attach(pendingPaired);
     }
@@ -974,7 +985,10 @@ import {
   /** Puts Deals on the page; the first time, also restores where the user was (search, scroll, sheet). */
   function attach(paired) {
     document.body.appendChild(host);
-    const wantOpen = reopenAfterCheck || !!paired || location.hash === '#vsdeals';
+    let after = null;
+    try { after = sessionStorage.getItem('vsx.reopen'); if (after === 'app' || after === 'app-paired') sessionStorage.removeItem('vsx.reopen'); } catch { /* private mode */ }
+    if (after === 'app-paired') setTimeout(() => toast('Sharing turned on — your list will appear on your link'), 400);
+    const wantOpen = reopenAfterCheck || !!paired || location.hash === '#vsdeals' || after === 'app' || after === 'app-paired';
     reopenAfterCheck = false; pendingPaired = null;
     if (restored) { if (wantOpen) openApp(); return; }
     restored = true;
@@ -1010,7 +1024,12 @@ import {
     if (location.hash === '#vsdeals') put('launcher', true);
     launcher.hidden = !get('launcher', true);
     // Leave a check alone; Deals mounts (and opens, if asked) once it's done.
-    if (onCheckPage()) { reopenAfterCheck = !!paired || location.hash === '#vsdeals'; pendingPaired = paired; return; }
+    if (onCheckPage()) {
+      reopenAfterCheck = !!paired || location.hash === '#vsdeals'; pendingPaired = paired;
+      // The check may reload the page when it's done (the hash is gone by then): remember to open.
+      if (reopenAfterCheck) try { sessionStorage.setItem('vsx.reopen', paired === 'ok' ? 'app-paired' : 'app'); } catch { /* private mode */ }
+      return;
+    }
     attach(paired);
   }
   mount();

@@ -19,7 +19,7 @@ const pos = (v) => (typeof v === 'number' && v > 0 ? v : null);
 /** A shared row the page can show: an id, a link and a real price. */
 export function isUsableItem(o) {
   return !!o && typeof o === 'object' && (typeof o.id === 'string' || typeof o.id === 'number') && String(o.id) !== '' &&
-    typeof o.url === 'string' && /^https?:\/\//i.test(o.url) && Number.isFinite(Number(o.site)) && Number(o.site) > 0;
+    typeof o.url === 'string' && /^https?:\/\//i.test(o.url) && Number.isFinite(Number(o.site)) && Number(o.site) >= 0.01;
 }
 
 // Text fields from shared JSON: a string (or number) or nothing — never an object or array.
@@ -39,7 +39,7 @@ export function normalizeItem(o, stock) {
     list: Math.max(Number.isFinite(Number(o.list)) ? Number(o.list) : 0, Number(o.site)),
     site: Number(o.site),
     adp: pos(o.adp),
-    cart: posNum(o.cart),
+    cart: posNum(o.cart) != null ? Math.round(posNum(o.cart)) || null : null,
     servings: posNum(o.servings),
     servingSize: txt(o.servingSize),
     form: txt(o.form),
@@ -324,7 +324,7 @@ export function aiPrompt(deals, total, store, mode) {
   // A store without online pickup: everything there is walk-in only.
   const walkInStore = !!store && store.pickup === false;
   const where = mode === 'pickup' && store
-    ? `on the shelf at ${/vitamin shoppe/i.test(store.name) ? store.name : 'The Vitamin Shoppe, ' + store.name} ${storeAddress(store) ? ` (${storeAddress(store)})` : ''}${walkInStore ? ' — walk-in only (this store has no online pickup)' : shown.some((d) => !d.pickup) ? ' — some walk-in only (no online pickup)' : ', all available for store pickup'}`
+    ? `on the shelf at ${/vitamin shoppe/i.test(store.name) ? store.name : 'The Vitamin Shoppe, ' + store.name}${storeAddress(store) ? ` (${storeAddress(store)})` : ''}${walkInStore ? ' — walk-in only (this store has no online pickup)' : shown.some((d) => !d.pickup) ? ' — some walk-in only (no online pickup)' : ', all available for store pickup'}`
     : store ? `from The Vitamin Shoppe online (stock also checked at ${store.name})` : 'from The Vitamin Shoppe online';
   const scope = total > shown.length
     ? `These are the top ${shown.length} of ${total} deals matching my filters.`

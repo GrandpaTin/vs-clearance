@@ -95,6 +95,8 @@ async function load({ manual = false } = {}) {
     // The phone may still have bars (a weak in-store signal): only say "offline" when it really is,
     // and "slow" only when the network was slow rather than unreachable.
     const cached = navigator.onLine === false ? 'offline' : via === 'error' ? 'failed' : 'slow';
+    // The network errored behind the saved copy (e.g. Wi-Fi with no internet): look again in 15 s.
+    if (via === 'error' && !manual) { clearTimeout(load.soon); load.soon = setTimeout(() => { if (document.visibilityState === 'visible') load(); }, 15000); }
     if (fromCache && state.snapshot) {
       // The worker turns a failed check into its saved copy: same grace as a failed fetch (one blip
       // on flaky mobile data isn't news; two in a row are). Offline shows at once.
@@ -124,7 +126,7 @@ async function load({ manual = false } = {}) {
     if (manual) toast(fromCache ? `${{ offline: 'You’re offline', slow: 'Connection is slow', failed: 'Couldn’t check for updates' }[cached]} · showing the last deals loaded`
       : sameList ? (oldList() ? `No newer list yet — this one is from ${relativeTime(snap.savedAt || snap.publishedAt)}` : 'You’re up to date')
       : oldList() ? `Loaded · this list is from ${relativeTime(snap.savedAt || snap.publishedAt)}`
-      : hadList ? 'Updated' : 'Deals loaded');
+      : hadList ? (changeIds().size ? `Updated · ${changeIds().size} new or cheaper` : 'Updated') : 'Deals loaded');
   } catch (e) {
     if (abort.superseded) { changed = false; return; } // a newer attempt took over
     if (e && e.unreadable) state.etag = null;
@@ -263,6 +265,7 @@ function render() {
 function renderHeader() {
   const snap = state.snapshot;
   if (state.loading) $('subtitle').textContent = snap ? 'Checking for newer deals…' : 'Loading…';
+  else if (snap && snap.rawCount > 0 && !state.items.length) $('subtitle').textContent = 'Couldn’t read the latest list';
   else if (snap) {
     const n = changeIds().size;
     $('subtitle').textContent = `${oldList() ? 'List from' : 'Updated'} ${relativeTime(snap.savedAt || snap.publishedAt)}` + (n ? ` · ${n} new or cheaper` : '');
@@ -616,7 +619,11 @@ document.addEventListener('click', async (e) => {
   }
   const act = el.dataset.act;
   switch (act) {
-    case 'floor': return update(() => { const v = Number(el.dataset.v); state.floor = state.floor === v ? 0 : v; });
+    case 'floor': {
+      const v = Number(el.dataset.v);
+      if (v === 0 && state.floor === 0) return; // already showing every discount
+      return update(() => { state.floor = state.floor === v ? 0 : v; });
+    }
     case 'instock': return update(() => { state.inStockOnly = !state.inStockOnly; });
     case 'cat': return update(() => { state.category = state.category === el.dataset.v ? null : el.dataset.v; });
     case 'changes': return update(() => { state.onlyChanges = !state.onlyChanges; });
@@ -775,7 +782,9 @@ $('copy-prompt').addEventListener('click', async () => {
     $('ai-links').hidden = false;
   } catch {
     btn.textContent = 'Copy prompt';
-    note.textContent = 'Couldn’t copy automatically — the prompt is selected below. Press and hold it, then choose Copy.';
+    note.textContent = matchMedia('(pointer: coarse)').matches
+      ? 'Couldn’t copy automatically — the prompt is selected below. Press and hold it, then choose Copy.'
+      : `Couldn’t copy automatically — the prompt is selected below. Press ${/Mac/i.test(navigator.platform) ? '⌘C' : 'Ctrl+C'} to copy it.`;
     $('prompt-details').open = true;
     const range = document.createRange();
     range.selectNodeContents($('prompt-text'));

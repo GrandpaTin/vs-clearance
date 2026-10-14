@@ -184,3 +184,12 @@ test('a 404 that still carries the listing counts as data (site change, October 
   assert.ok(!isListingDespiteStatus(500, listing));
   assert.ok(!isListingDespiteStatus(404, null));
 });
+
+test('pickup prompt line has no stray spaces, with or without an address', () => {
+  const d = normalizeItem(raw('p1'), { jp1: 3 });
+  const bare = aiPrompt([d], 1, { id: 's', name: 'Tampa', pickup: true }, 'pickup');
+  assert.match(bare, /The Vitamin Shoppe, Tampa, all available/);
+  const withAddr = aiPrompt([d], 1, { id: 's', name: 'Kingsway', a1: '1 Main St', city: 'Brandon', state: 'FL', zip: '33511', pickup: true }, 'pickup');
+  assert.match(withAddr, /Kingsway \(1 Main St, Brandon, FL 33511\), all available/);
+  assert.ok(!/ {2}|\s,/.test(bare.split('\n')[0] + withAddr.split('\n')[0]));
+});

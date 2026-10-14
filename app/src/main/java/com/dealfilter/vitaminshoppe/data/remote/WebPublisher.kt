@@ -254,6 +254,9 @@ class WebPublisher(
             } finally {
                 conn.disconnect()
             }
+        } catch (e: javax.net.ssl.SSLException) {
+            // Not a passing outage: the address doesn't speak https (Android won't send the list over plain http).
+            Outcome("Your server must use https (for example Tailscale Serve) — plain http:// addresses can't be used.")
         } catch (e: IOException) {
             // PC off, Tailscale down or no network: not an error worth showing, just try again later.
             Outcome("Will sync when ${Uri.parse(s.serverUrl).host ?: "your server"} is reachable", retryLater = true)

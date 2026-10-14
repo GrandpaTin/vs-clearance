@@ -245,7 +245,7 @@ fun CategoryChips(
                 selected = selected.equals(category, true),
                 onClick = { onToggle(category) },
                 label = { Text(category, maxLines = 1) },
-                leadingIcon = if (selected == category) {
+                leadingIcon = if (selected.equals(category, true)) {
                     { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(FilterChipDefaults.IconSize)) }
                 } else null
             )
