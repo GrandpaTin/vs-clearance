@@ -75,6 +75,9 @@ class WebSession(context: Context) : JsonFetcher {
 
     /** The page load under way was started by a background request: a check it finds waits for the user. */
     private var quietLoad = false
+
+    /** When the site's check was last found on the page (elapsedRealtime). */
+    private var challengeSeenAt = 0L
     private var inForeground = true
     private var paused = false
     private var lastPageStartedAt = 0L
@@ -259,8 +262,14 @@ class WebSession(context: Context) : JsonFetcher {
             when (pageState) {
                 PageState.READY -> return@withContext
                 PageState.CHALLENGE -> {
-                    if (quiet == null) _challengeVisible.value = true
-                    throw FetchException.VerificationRequired()
+                    // A quiet request 30+ minutes after the check appeared reloads the page normally:
+                    // the site may have lifted it. If it's still there, this fails quietly again.
+                    val stale = quiet != null && SystemClock.elapsedRealtime() - challengeSeenAt > 30 * 60_000L
+                    if (!stale) {
+                        if (quiet == null) _challengeVisible.value = true
+                        throw FetchException.VerificationRequired()
+                    }
+                    pageState = PageState.NOT_LOADED
                 }
                 else -> Unit
             }
@@ -420,6 +429,7 @@ class WebSession(context: Context) : JsonFetcher {
                     "i" -> Unit
                     "c", "b" -> {
                         pageState = PageState.CHALLENGE
+                        challengeSeenAt = SystemClock.elapsedRealtime()
                         pageWaiter?.complete(PageState.CHALLENGE)
                         if (!quietLoad) _challengeVisible.value = true
                     }

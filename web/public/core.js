@@ -32,7 +32,7 @@ export function normalizeItem(o, stock) {
     title: String(o.title || o.id).trim(),
     url: o.url,
     img: o.img || null,
-    list: Math.max(Number(o.list), Number(o.site)),
+    list: Math.max(Number(o.list) || 0, Number(o.site)),
     site: Number(o.site),
     adp: pos(o.adp),
     cart: o.cart > 0 ? o.cart : null,

@@ -380,7 +380,6 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
                 }
                 shareIfOn()
             } catch (e: Exception) {
-                val detail = e.message?.let { " $it" } ?: ""
                 val cause = when (e) {
                     is FetchException.Offline -> "You're offline."
                     is FetchException.Timeout -> "Vitamin Shoppe took too long to answer."
@@ -388,7 +387,8 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
                     is FetchException -> e.message
                     else -> null
                 }
-                _uiState.update { it.copy(stockError = "Couldn't check stock at ${store.name}.$detail", stockErrorCause = cause, stockNeedsVerification = false) }
+                val said = (cause ?: e.message)?.takeIf { it.isNotBlank() }?.let { " $it" } ?: ""
+                _uiState.update { it.copy(stockError = "Couldn't check stock at ${store.name}.$said", stockErrorCause = cause, stockNeedsVerification = false) }
                 if (inForeground && stockFailures < STOCK_RETRY_DELAYS_MS.size) {
                     val wait = STOCK_RETRY_DELAYS_MS[stockFailures++]
                     stockRetryJob?.cancel()
@@ -451,8 +451,14 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
 
     fun closeWebShare() = _uiState.update { it.copy(isWebShareOpen = false) }
 
-    fun saveWebShare(gitHubRepo: String, gitHubToken: String, serverUrl: String, serverToken: String, enabled: Boolean) =
+    fun saveWebShare(gitHubRepo: String, gitHubToken: String, serverUrl: String, serverToken: String, enabled: Boolean) {
+        val before = publisher.state.value
         publisher.configure(gitHubRepo, gitHubToken, serverUrl, serverToken, enabled)
+        val after = publisher.state.value
+        // New credentials: try them now rather than leaving the old error up until the next refresh.
+        if (after.gitHubRepo != before.gitHubRepo || after.gitHubToken != before.gitHubToken ||
+            after.serverUrl != before.serverUrl || after.serverToken != before.serverToken) shareIfOn()
+    }
 
     fun setWebShareEnabled(enabled: Boolean) {
         publisher.setEnabled(enabled)
@@ -552,9 +558,12 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
         val base = copy(category = validCategory)
         return base.copy(
             visibleDeals = DealFilters.apply(allDeals, base.criteria),
-            categories = DealFilters.topCategories(allDeals)
+            categories = if (allDeals === categoriesFor) categories else DealFilters.topCategories(allDeals).also { categoriesFor = allDeals }
         )
     }
+
+    /** The list [DealUiState.categories] was computed from (they only change when the list does). */
+    private var categoriesFor: List<DealItem>? = null
 
     private fun savePreferences() {
         if (!restored) return
@@ -598,6 +607,7 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
         storeSearchJob = viewModelScope.launch {
             _uiState.update { it.copy(storeSheet = it.storeSheet?.copy(isSearching = true, message = null)) }
             var results: List<StoreLocation>? = null
+            var isError = false
             val message: String? = try {
                 val result = repository.searchStores(query)
                 results = result.stores
@@ -614,12 +624,13 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
                 afterVerification["storeSearch"] = { if (_uiState.value.storeSheet != null) searchStores() }
                 "Complete the verification and the search will run again."
             } catch (e: Exception) {
+                isError = true
                 e.message ?: "Store search failed. Please try again."
             }
             _uiState.update { state ->
                 state.copy(
                     storeSheet = state.storeSheet?.let { s ->
-                        s.copy(results = results ?: if (query == lastStoreQuery) s.results else emptyList(), message = message, isSearching = false, hasSearched = true)
+                        s.copy(results = results ?: if (query == lastStoreQuery) s.results else emptyList(), message = message, messageIsError = isError, isSearching = false, hasSearched = true)
                     }
                 )
             }
@@ -628,7 +639,7 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
 
     override fun selectStore(store: StoreLocation) {
         if (!store.isSelectable) {
-            showMessage(if (store.temporarilyClosed) "${store.name} is temporarily closed." else "${store.name} doesn't offer in-store pickup.")
+            showMessage("${store.name} is temporarily closed.")
             return
         }
         storeSearchJob?.cancel()
@@ -688,7 +699,7 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
     /** User closed the sheet; don't retry behind their back (the banner keeps a Verify button). */
     fun cancelVerification() {
         if (afterVerification.containsKey("storeSearch")) {
-            _uiState.update { s -> s.copy(storeSheet = s.storeSheet?.copy(message = "Search again when you're ready.")) }
+            _uiState.update { s -> s.copy(storeSheet = s.storeSheet?.copy(message = "Search again when you're ready.", messageIsError = false)) }
         }
         afterVerification.clear()
         verificationDeclinedAt = System.currentTimeMillis()

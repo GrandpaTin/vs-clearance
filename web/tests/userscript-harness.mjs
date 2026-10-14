@@ -138,7 +138,9 @@ await run('07-launcher', { fn: async (page, app) => {
   // A busy PC can take a while to start the server: wait for its config (up to 10 s).
   const cfg = path.join(dataDir, 'config.json');
   for (let i = 0; i < 100 && !fs.existsSync(cfg); i++) await new Promise((r) => setTimeout(r, 100));
-  await new Promise((r) => setTimeout(r, 300));
+  for (let i = 0; i < 100; i++) {
+    try { await fetch(`http://127.0.0.1:${port}/`); break; } catch { await new Promise((r) => setTimeout(r, 100)); }
+  }
   const token = JSON.parse(fs.readFileSync(cfg, 'utf8')).token;
   const pair = Buffer.from(JSON.stringify({ url: 'https://share.test', token })).toString('base64url');
   try {
@@ -156,7 +158,7 @@ await run('07-launcher', { fn: async (page, app) => {
       await app.locator('.store-form input').fill('33701');
       await app.locator('.store-form button').click();
       await app.locator('.store').first().click();
-      await app.locator('.share-line', { hasText: 'Shared to your link' }).waitFor({ timeout: 15000 });
+      await app.locator('.share-line', { hasText: 'Shared to your link' }).waitFor({ timeout: 30000 });
       await page.waitForTimeout(300);
       await shot(page, '08-share');
       const snap = await (await fetch(`http://127.0.0.1:${port}/api/snapshot`)).json();

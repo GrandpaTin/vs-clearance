@@ -64,10 +64,19 @@ self.addEventListener('fetch', (e) => {
   // Shell: network first so a fix reaches everyone on their next visit; the cache is only the
   // offline fallback. Revalidated with the server (GitHub Pages lets browsers keep files 10 minutes),
   // so a new page never runs with the previous version's scripts.
-  e.respondWith(fetch(e.request, { cache: 'no-cache' }).then((res) => {
+  // A request that hangs (weak in-store signal) answers from the saved copy after 3.5 s; the network
+  // copy still lands in the cache for next time. A first visit (nothing saved) just waits.
+  const network = fetch(e.request, { cache: 'no-cache' }).then((res) => {
     if (res.ok) { const copy = res.clone(); caches.open(VERSION).then((c) => c.put(e.request, copy)); }
     return res;
-  }).catch(() => caches.match(e.request, { ignoreSearch: true }).then((r) =>
+  });
+  network.catch(() => {});
+  e.respondWith(caches.match(e.request, { ignoreSearch: true }).then((cached) => {
     // Only a page visit may fall back to the app page; a stylesheet or script must never get HTML.
-    r || (e.request.mode === 'navigate' ? caches.match(url.pathname.includes('/get') ? 'get/' : 'index.html') : Response.error()))));
+    const fallback = () => cached || (e.request.mode === 'navigate'
+      ? caches.match(url.pathname.includes('/get') ? 'get/' : 'index.html').then((r) => r || Response.error())
+      : Response.error());
+    if (!cached) return network.catch(fallback);
+    return Promise.race([network.catch(fallback), new Promise((resolve) => setTimeout(() => resolve(cached), 3500))]);
+  }));
 });

@@ -1,6 +1,7 @@
 package com.dealfilter.vitaminshoppe.data.repository
 
 import com.dealfilter.vitaminshoppe.data.model.DealItem
+import com.dealfilter.vitaminshoppe.data.remote.FetchException
 import com.dealfilter.vitaminshoppe.data.remote.JsonFetcher
 import com.dealfilter.vitaminshoppe.data.remote.VsApi
 
@@ -32,7 +33,11 @@ class DealRepository(private val fetcher: JsonFetcher) {
         val skus = items.mapNotNull { it.jdaSkuId }.distinct()
         val stock = HashMap<String, Int>(skus.size)
         for (batch in skus.chunked(VsApi.INVENTORY_BATCH)) {
-            stock += VsApi.parseInventory(fetcher.getJson(VsApi.inventoryUrl(storeId, batch)))
+            val got = VsApi.parseInventory(fetcher.getJson(VsApi.inventoryUrl(storeId, batch)))
+            // Fewer than half the SKUs answered: the store's stock service is having trouble, and
+            // treating the rest as "none on the shelf" would be a confident wrong answer.
+            if (got.size * 2 < batch.size) throw FetchException.BadData("Shelf stock came back incomplete.")
+            stock += got
         }
         return stock
     }

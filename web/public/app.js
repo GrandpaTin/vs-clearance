@@ -47,6 +47,8 @@ let quietFailures = 0;
 let inflight = null;
 
 async function load({ manual = false } = {}) {
+  // First visit, download still coming: a background check would only throw it away and start over.
+  if (inflight && !state.snapshot && !manual) return;
   $('refresh').classList.add('spin');
   const before = state.error;
   const wasLoading = state.loading;
@@ -318,12 +320,14 @@ function renderBody() {
   status.hidden = true;
   status.innerHTML = '';
   // Reuse the card element when its markup is unchanged so images don't reload and flash.
-  const next = new Map();
+  // Every built card is kept (filters only hide them), minus deals no longer in the list.
+  const ids = new Set(state.items.map((d) => d.id));
+  const next = new Map([...cardCache].filter(([id]) => ids.has(id)));
   const tpl = document.createElement('template');
   const build = (d) => {
     const html = cardHtml(d);
-    const old = cardCache.get(d.id);
-    if (old && old.html === html) { next.set(d.id, old); return old.el; }
+    const old = next.get(d.id);
+    if (old && old.html === html) return old.el;
     tpl.innerHTML = html.trim();
     const el = tpl.content.firstElementChild;
     next.set(d.id, { html, el });
@@ -331,10 +335,9 @@ function renderBody() {
   };
   // Building hundreds of new cards at once freezes a phone for a second: show the first screenful
   // now and add the rest in small steps (cards already built are reused, so later renders are quick).
-  const fresh = deals.filter((d) => !cardCache.has(d.id)).length;
+  const fresh = deals.filter((d) => !next.has(d.id)).length;
   const first = fresh > 60 ? 40 : deals.length;
   const els = deals.slice(0, first).map(build);
-  const prevCache = cardCache;
   cardCache = next;
   list.replaceChildren(...els);
   if (first < deals.length) {
@@ -342,9 +345,7 @@ function renderBody() {
     const rest = deals.slice(first);
     const more = () => {
       if (token !== renderToken) return;
-      const swap = cardCache; cardCache = prevCache; // reuse lookups still read the old cache
       const chunk = rest.splice(0, 60).map(build);
-      cardCache = swap;
       list.append(...chunk);
       if (rest.length) setTimeout(more, 0);
     };
@@ -380,8 +381,11 @@ function renderControls() {
   // Nothing matches at all: the empty state offers the fixes, so a row of zeros would only add noise.
   const counting = { ...base, unsorted: true };
   const none = applyFilters(state.items, { ...counting, minDiscount: 0 }).length === 0;
+  const nActive = state.floor ? applyFilters(state.items, { ...counting, minDiscount: state.floor }).length : -1;
   for (const f of none ? [] : FLOORS) {
     const n = applyFilters(state.items, { ...counting, minDiscount: f }).length;
+    // "Any discount" that would show exactly what the active floor shows is just noise (Clear resets it).
+    if (!f && state.floor && n === nActive) { prev = n; continue; }
     if (f && (n === 0 || n > prev * 0.97) && state.floor !== f) continue;
     prev = n;
     chips.push(`<button class="chip" data-act="floor" data-v="${f}" aria-pressed="${state.floor === f}">${f ? f + '%+ off' : 'Any discount'} <span class="n">${n}</span></button>`);

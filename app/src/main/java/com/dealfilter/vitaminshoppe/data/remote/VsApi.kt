@@ -186,7 +186,8 @@ object VsApi {
     /** jdaSkuId -> units on hand. "na" (not carried) and anything unparseable count as 0. */
     fun parseInventory(json: String): Map<String, Int> {
         val root = parseObject(json)
-        val arr = root.optJSONArray("skuInventory") ?: return emptyMap()
+        // The real answer lists every SKU asked about (even "0" / "na"): no list means a broken answer.
+        val arr = root.optJSONArray("skuInventory") ?: throw FetchException.BadData("Shelf stock came back empty.")
         val out = HashMap<String, Int>(arr.length())
         for (i in 0 until arr.length()) {
             val o = arr.optJSONObject(i) ?: continue

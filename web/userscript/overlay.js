@@ -239,7 +239,7 @@ import {
     if (!s) { el.hidden = true; return; }
     const st = state.shareStatus;
     el.hidden = false;
-    setHtml(el, `<span>📤 ${st?.error ? esc(st.error) : st?.at ? `Shared to your link ${relativeTime(st.at)}` : 'Sharing to your link'}</span>
+    setHtml(el, `<span><span aria-hidden="true">📤</span> ${st?.error ? esc(st.error) : st?.at ? `Shared to your link ${relativeTime(st.at)}` : 'Sharing to your link'}</span>
       <a class="text-btn" data-key="open-share" href="${esc(s.url)}" target="_blank" rel="noopener">Open</a>
       <button class="text-btn" data-act="stop-share">Stop</button>`);
   }
@@ -247,8 +247,8 @@ import {
   const storeSearch = { query: get('storeQuery', ''), results: [], message: null, searching: false };
   async function searchStores() {
     const q = storeSearch.query.trim();
-    if (!q) { storeSearch.message = 'Enter a ZIP code or city to find stores.'; return renderSheet(); }
-    if (/^\d+$/.test(q) && q.length !== 5) { storeSearch.message = 'ZIP codes have 5 digits.'; return renderSheet(); }
+    if (!q) { storeSearch.message = 'Enter a ZIP code or city to find stores.'; storeSearch.blocked = false; return renderSheet(); }
+    if (/^\d+$/.test(q) && q.length !== 5) { storeSearch.message = 'ZIP codes have 5 digits.'; storeSearch.blocked = false; return renderSheet(); }
     storeSearch.searching = true; storeSearch.message = null; storeSearch.blocked = false; renderSheet();
     put('storeQuery', q);
     try {
@@ -258,8 +258,8 @@ import {
         : status === 'unrecognized' ? `Couldn't find “${q}”. Try a 5-digit ZIP or “City, ST”.` : null;
       put('storeQuery', q);
     } catch (e) {
-      storeSearch.message = e.message;
       storeSearch.blocked = e instanceof Blocked;
+      storeSearch.message = storeSearch.blocked || /try again/i.test(e.message) ? e.message : `${e.message.replace(/\.?$/, '.')} Try again in a minute.`;
     } finally {
       storeSearch.searching = false; renderSheet();
     }
@@ -298,7 +298,7 @@ import {
         </label>
       </header>
       <div class="scroll" data-ref="scroll">
-        <div data-ref="banner"></div>
+        <div data-ref="banner" role="status" aria-live="polite"></div>
         <section class="controls" data-ref="controls"></section>
         <div class="summary" data-ref="summary"></div>
         <span class="vh" data-ref="live" role="status" aria-live="polite"></span>
@@ -383,13 +383,13 @@ import {
   function renderFootNote() {
     const hidden = !get('launcher', true);
     setHtml(ref('footNote'), `<span class="fn">VS Clearance ${esc(__VSX_VERSION__)}</span><span class="fn"><a class="link-btn" data-key="update" href="${esc(__VSX_HOME__)}vs-clearance.user.js" target="_blank" rel="noopener">Update VS Clearance</a></span><span class="fn">` +
-      (hidden ? '<button class="link-btn" data-act="show-launcher">Show the 🏷️ Deals button</button>'
-        : '<button class="link-btn" data-act="hide-launcher">Hide the 🏷️ Deals button</button>') + '</span>');
+      (hidden ? '<button class="link-btn" data-act="show-launcher">Show the <span aria-hidden="true">🏷️</span> Deals button</button>'
+        : '<button class="link-btn" data-act="hide-launcher">Hide the <span aria-hidden="true">🏷️</span> Deals button</button>') + '</span>');
   }
 
   const savedPhrase = () => {
     const ago = relativeTime(state.savedAt);
-    return ago === 'just now' ? 'showing the list you just loaded' : `showing the list saved ${ago}`;
+    return ago === 'just now' ? 'keeping the list on screen' : `showing the list saved ${ago}`;
   };
 
   /** Only touches a region when its content changed, so a no-change render keeps focus and scroll. */
@@ -418,7 +418,11 @@ import {
       const all = [...root.querySelectorAll(`[data-${kind}]`)].filter((el) => el.dataset[kind] === id && el.offsetParent);
       const pick = (list) => (v == null ? null : list.find((el) => el.dataset.v === v)) || list[0];
       const inRegion = region ? all.filter((el) => { const r = el.parentElement && el.parentElement.closest('[data-ref]'); return r && r.dataset.ref === region; }) : [];
-      const same = pick(inRegion) || pick(all);
+      // A Retry that worked is gone: continue at the store (shelf stock) or the list, not the dialog
+      // or another region's button with the same action.
+      const next = id === 'retry-stock' ? root.querySelector('.store-row')
+        : id === 'refresh' ? root.querySelector('[data-card]') || ref('q') : null;
+      const same = pick(inRegion) || (region && next && next.offsetParent ? next : null) || pick(all) || (next && next.offsetParent ? next : null);
       (same || app).focus({ preventScroll: true });
       if (same && same.classList.contains('chip')) same.scrollIntoView({ inline: 'nearest', block: 'nearest' });
     }
@@ -442,7 +446,7 @@ import {
       setList(list, state.loading ? '<li class="skeleton"></li>'.repeat(4) : '');
       status.hidden = state.loading;
       status.innerHTML = state.loading ? '' : statusHtml(state.blocked ? '🛡️' : '⚠️',
-        state.blocked ? 'Quick check needed' : "Couldn't load deals", state.blocked ? 'Vitamin Shoppe wants to confirm a person is browsing. Tap Reload page, complete any check, and Deals reopens.' : esc(state.error || "Vitamin Shoppe didn't send any deals."),
+        state.blocked ? 'Quick check needed' : "Couldn't load deals", state.blocked ? 'Vitamin Shoppe wants to confirm a person is browsing. Tap Reload page, complete any check, and Deals reopens.' : esc(state.error || "Vitamin Shoppe didn't send any deals.") + (state.siteChanged ? '' : ' It will try again automatically, or tap Try again.'),
         state.siteChanged ? [['Try again', 'refresh', false]] : [[state.blocked ? 'Reload page' : 'Try again', state.blocked ? 'reload-page' : 'refresh', true]]) +
         (state.siteChanged ? `<div class="actions"><a class="primary-btn" href="${esc(__VSX_HOME__)}vs-clearance.user.js" target="_blank" rel="noopener">Update VS Clearance</a></div>` : '');
       return;
@@ -454,7 +458,7 @@ import {
     clearTimeout(render.say);
     render.say = setTimeout(() => { if (ref('live').textContent !== said) ref('live').textContent = said; }, 700);
     setHtml(ref('summary'), `<span class="count" aria-hidden="true">${deals.length === total ? `${total} deals` : `${deals.length} of ${total}`}</span>
-      ${deals.length ? `<button class="tonal-btn" data-act="ai">🧠 Ask AI (${Math.min(deals.length, AI_MAX_ITEMS)})</button>` : ''}
+      ${deals.length ? `<button class="tonal-btn" data-act="ai"><span aria-hidden="true">🧠</span> Ask AI (${Math.min(deals.length, AI_MAX_ITEMS)})</button>` : ''}
       <label class="sort"><span class="vh">Sort by</span><span aria-hidden="true">⇅</span><select data-ref="sort">${SORTS.map((o) => `<option value="${o.id}"${o.id === state.sort ? ' selected' : ''}>${esc(o.short)}</option>`).join('')}</select></label>`);
     if (state.mode === 'pickup' && state.stockLoading && !deals.length) {
       setList(list, ''); status.hidden = false;
@@ -484,10 +488,10 @@ import {
   function renderBanner() {
     let html = '';
     if (state.blocked && state.items.length) {
-      html = `<div class="banner warn" role="status"><span><b>Quick check needed</b> to refresh · ${savedPhrase()}. Reload, complete Vitamin Shoppe's check, and Deals reopens.</span>
+      html = `<div class="banner warn"><span><b>Quick check needed</b> to refresh · ${savedPhrase()}. Reload, complete Vitamin Shoppe's check, and Deals reopens.</span>
         <button class="text-btn" data-act="reload-page">Reload page</button></div>`;
     } else if (state.error && state.items.length) {
-      html = `<div class="banner warn" role="status"><span><b>Couldn't refresh.</b> ${esc(state.error.replace(/\.$/, ''))} · ${savedPhrase()}.</span>` +
+      html = `<div class="banner warn"><span><b>Couldn't refresh.</b> ${esc(state.error.replace(/\.$/, ''))} · ${savedPhrase()}.</span>` +
         (state.siteChanged ? `<a class="text-btn" href="${esc(__VSX_HOME__)}vs-clearance.user.js" target="_blank" rel="noopener">Update</a>` : '') +
         '<button class="text-btn" data-act="refresh">Retry</button></div>';
     } else if (state.partialNote) {
@@ -499,7 +503,7 @@ import {
       // (In pickup with nothing to show, the full-page panel below says it instead.)
       // The age only matters when the counts on screen are from an earlier check.
       const age = hasStock() && Date.now() - state.stock.at > 10 * 60_000 ? ` · showing stock checked ${relativeTime(state.stock.at)}` : '';
-      html = `<div class="banner bad" role="status"><span>${esc(state.stockError.replace(/\.$/, ''))}${age}.${state.stockAdvice ? ' ' + esc(state.stockAdvice) : ''}</span><button class="text-btn" data-act="${state.stockBlocked ? 'reload-page' : 'retry-stock'}">${state.stockBlocked ? 'Reload page' : 'Retry'}</button></div>`;
+      html = `<div class="banner bad"><span>${esc(state.stockError.replace(/\.$/, ''))}${age}.${state.stockAdvice ? ' ' + esc(state.stockAdvice) : ''}</span><button class="text-btn" data-act="${state.stockBlocked ? 'reload-page' : 'retry-stock'}">${state.stockBlocked ? 'Reload page' : 'Retry'}</button></div>`;
     } else if (hasStock() && !state.stockLoading && Date.now() - (state.stock.at || 0) > 6 * 3600e3) {
       // 7. shelf stock's age said once, not on every card
       html = `<div class="banner info"><span>Shelf stock at ${esc(state.store.name)} was checked ${relativeTime(state.stock.at)}.</span><button class="text-btn" data-act="retry-stock">Check now</button></div>`;
@@ -531,7 +535,7 @@ import {
         <span aria-hidden="true">▾</span>
       </button>
       <div class="chips">${chips.join('')}</div>
-      <div class="chips">${n ? `<button class="chip" data-act="changes" aria-pressed="${state.onlyChanges}">✨ New & price drops (${n})</button>` : ''}${cats.map((c) => `<button class="chip" data-act="cat" data-v="${esc(c)}" aria-pressed="${state.category === c}">${esc(c)}</button>`).join('')}</div>`);
+      <div class="chips">${n ? `<button class="chip" data-act="changes" aria-pressed="${state.onlyChanges}"><span aria-hidden="true">✨</span> New & price drops (${n})</button>` : ''}${cats.map((c) => `<button class="chip" data-act="cat" data-v="${esc(c)}" aria-pressed="${state.category === c}">${esc(c)}</button>`).join('')}</div>`);
     if (ref('controls')._html !== before) ref('controls').querySelectorAll('.chips').forEach((r, i) => { r.scrollLeft = rows[i] || 0; });
   }
 
@@ -549,7 +553,7 @@ import {
     else if (d.oos) { stock = 'Out of stock online'; dot = 'bad'; }
     else { stock = 'In stock online'; dot = 'good'; }
     const pills = facts(d).map((f) => `<span class="pill">${esc(f)}</span>`).join('') +
-      (d.rating && d.reviews >= 3 ? `<span class="rating">★ ${d.rating.toFixed(1)} (${d.reviews})</span>` : '');
+      (d.rating && d.reviews >= 3 ? `<span class="rating"><span aria-hidden="true">★ ${d.rating.toFixed(1)} (${d.reviews})</span><span class="vh">rated ${d.rating.toFixed(1)} out of 5, ${d.reviews} reviews</span></span>` : '');
     return `<li class="card">
       <a class="thumb${d.img ? '' : ' none'}" href="${esc(d.url)}" tabindex="-1" aria-hidden="true">${d.img ? `<img src="${esc(d.img)}" alt="" loading="lazy">` : '📦'}</a>
       <div class="body">
@@ -557,7 +561,7 @@ import {
         <a class="title" data-card="${esc(d.id)}" href="${esc(d.url)}">${esc(d.title)}</a>
         <div class="prices"><span class="price"><span class="vh">${est != null ? 'about ' : 'now '}</span><span aria-hidden="true">${est != null ? '≈' : ''}</span>${money(bestPrice(d))}</span>${off ? `<span class="vh">, was </span><span class="was">${money(d.list)}</span><span class="tag off"><span aria-hidden="true">−${off}%</span><span class="vh">, ${off}% off</span></span>` : ''}</div>
         ${was != null ? `<span class="note">Down from <s>${money(was)}</s> since your last check</span>` : ''}
-        ${est != null ? `<span class="note">🛒 Extra ${d.cart}% off in cart (lists ${money(d.site)})</span>` : ''}
+        ${est != null ? `<span class="note"><span aria-hidden="true">🛒</span> Extra ${d.cart}% off in cart (lists ${money(d.site)})</span>` : ''}
         ${adp ? `<span class="note">${money(adp)} with Auto Delivery</span>` : ''}
         ${pills ? `<div class="pills">${pills}</div>` : ''}
         <div class="foot"><span class="stock"><span class="dot ${dot}"></span>${esc(stock)}</span>
@@ -621,7 +625,7 @@ import {
         const why = s.closed ? 'Temporarily closed' : !s.pickup ? 'No in-store pickup' : null;
         const today = why || todaysHours(s.hours);
         return `<button class="store${state.store?.id === s.id ? ' selected' : ''}" data-act="pick-store" data-id="${esc(s.id)}"${why ? ' aria-disabled="true"' : ''}>
-          <span class="store-main"><b>${esc(s.name)}${state.store?.id === s.id ? ' ✓' : ''}</b>
+          <span class="store-main"><b>${esc(s.name)}${state.store?.id === s.id ? '<span aria-hidden="true"> ✓</span><span class="vh">, selected</span>' : ''}</b>
             <span>${esc([s.a1, s.a2].filter(Boolean).join(', '))}</span><span>${esc(`${s.city}, ${s.state} ${s.zip}`)}</span>
             ${today ? `<small class="${why ? 'err' : ''}">${esc(today)}</small>` : ''}</span>
           <span class="dist">${s.dist >= 0 ? (s.dist < 10 ? s.dist.toFixed(1) : Math.round(s.dist)) + ' mi' : ''}</span></button>`;
@@ -662,8 +666,14 @@ import {
     const v = el.dataset.v;
     switch (el.dataset.act) {
       case 'close': return closeApp();
-      case 'refresh': return loadDeals();
-      case 'retry-stock': return loadStock({ onlyMissing: hasStock() && !!state.stock.partial && Date.now() - state.stock.at < 6 * 3600e3 });
+      case 'refresh':
+        await loadDeals();
+        if (!state.error && state.items.length) toast('Deals updated');
+        return;
+      case 'retry-stock':
+        await loadStock({ onlyMissing: hasStock() && !!state.stock.partial && Date.now() - state.stock.at < 6 * 3600e3 });
+        if (!state.stockError && state.store) toast(`Shelf stock updated for ${state.store.name}`);
+        return;
       case 'reload-page':
         // Back where they were after the check: the store sheet reopens (and searches) if it was open.
         try { if (state.sheet === 'stores') sessionStorage.setItem('vsx.reopen', 'stores'); } catch { /* private mode */ }

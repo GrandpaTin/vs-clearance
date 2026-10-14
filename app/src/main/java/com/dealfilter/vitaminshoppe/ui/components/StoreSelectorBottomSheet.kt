@@ -125,7 +125,7 @@ fun StoreSelectorBottomSheet(
                 Text(
                     it,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.error,
+                    color = if (sheet.messageIsError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 8.dp)
                 )
             }
@@ -171,11 +171,8 @@ private fun StoreRow(store: StoreLocation, isSelected: Boolean, onSelect: (Store
     val badges = DealTheme.badges
     val context = LocalContext.current
     val enabled = store.isSelectable
-    val unavailableReason = when {
-        store.temporarilyClosed -> "Temporarily closed"
-        !store.pickupEnabled -> "No in-store pickup"
-        else -> null
-    }
+    val unavailableReason = if (store.temporarilyClosed) "Temporarily closed" else null
+    val walkInOnly = if (!store.temporarilyClosed && !store.pickupEnabled) "Walk-in only — no online pickup" else null
     Surface(
         onClick = { onSelect(store) },
         shape = RoundedCornerShape(12.dp),
@@ -209,7 +206,7 @@ private fun StoreRow(store: StoreLocation, isSelected: Boolean, onSelect: (Store
                 Text(store.streetLine, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(store.cityLine, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 val today = todaysHours(store.hours)
-                val status = unavailableReason ?: store.statusMessage?.takeIf { it.isNotBlank() } ?: today
+                val status = unavailableReason ?: walkInOnly ?: store.statusMessage?.takeIf { it.isNotBlank() } ?: today
                 status?.let {
                     Text(
                         it,

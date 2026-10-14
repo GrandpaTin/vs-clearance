@@ -36,6 +36,11 @@ data class DealItem(
     /** Units on the shelf at the selected store; null when no store is selected or unknown. */
     val storeQuantity: Int? = null
 ) {
+    /** Normalized brand/title/category/form for search, worked out once per item (not per keystroke). */
+    val searchText: String by lazy {
+        com.dealfilter.vitaminshoppe.domain.SearchMatcher.normalize(listOfNotNull(brand, title, category, form).joinToString(" "))
+    }
+
     /** Cart price implied by "X% Off - See Sale Price In Cart", only when it beats the page price. */
     val estimatedCartPrice: Double?
         get() {

@@ -170,4 +170,14 @@ class VsApiTest {
         assertEquals("8:30 PM", VsApi.tidyTime("08:30 PM"))
         assertEquals("10 AM", VsApi.tidyTime("10 AM"))
     }
+    @Test
+    fun `an inventory answer without its stock list is an error, never zero on the shelf`() {
+        val thrown = try {
+            VsApi.parseInventory("""{"RESPONSE_CODE":"SERVICE_NOT_AVAILABLE"}""")
+            null
+        } catch (e: FetchException) {
+            e
+        }
+        assertNotNull("must throw rather than report every item as 0", thrown)
+    }
 }

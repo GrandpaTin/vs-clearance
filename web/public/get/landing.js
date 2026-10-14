@@ -7,7 +7,8 @@
   if (canShare) document.getElementById('copy-link').textContent = 'Share link';
   document.getElementById('copy-link').addEventListener('click', function () {
     var btn = this;
-    var done = function () { btn.textContent = 'Copied!'; setTimeout(function () { btn.textContent = 'Copy link'; }, 2000); };
+    var label = btn.textContent;
+    var done = function () { btn.textContent = 'Copied!'; setTimeout(function () { btn.textContent = label; }, 2000); };
     if (canShare) {
       navigator.share({ title: 'VS Clearance', text: 'Vitamin Shoppe clearance deal finder', url: url })
         .catch(function (e) { if (!e || e.name !== 'AbortError') fallback(); });

@@ -142,7 +142,7 @@ class WebPublisher(
         // An old "token rejected" error belongs to the old settings; the next sync reports on the new ones.
         if (changed) edit.remove(K_ERROR).remove(K_NOTE)
         edit.apply()
-        _state.update { readState().copy(lastPublishedAt = it.lastPublishedAt, pending = it.pending) }
+        _state.update { readState().copy(lastPublishedAt = it.lastPublishedAt, pending = it.pending, isPublishing = it.isPublishing) }
     }
 
     /** One target from a pairing link (vsdeals://publish?url=&token=): it goes in the slot its address fits. */
@@ -202,6 +202,13 @@ class WebPublisher(
             }
         }
         val now = System.currentTimeMillis()
+        // The settings changed while this was out (a new token was saved): its result describes the old
+        // ones, so don't report it against the new.
+        val cur = _state.value
+        if (cur.gitHubRepo != s.gitHubRepo || cur.gitHubToken != s.gitHubToken || cur.serverUrl != s.serverUrl || cur.serverToken != s.serverToken) {
+            _state.update { it.copy(isPublishing = false) }
+            return@withLock null
+        }
         val ok = outcome.error == null
         lastPublishedSignature = if (ok && !outcome.retryLater) signature else null
         prefs.edit().putBoolean(K_PENDING, outcome.retryLater)

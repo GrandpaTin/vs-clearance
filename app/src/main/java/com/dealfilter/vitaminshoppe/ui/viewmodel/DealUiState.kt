@@ -14,7 +14,9 @@ data class StoreSheetState(
     val results: List<StoreLocation> = emptyList(),
     val isSearching: Boolean = false,
     val hasSearched: Boolean = false,
-    val message: String? = null
+    val message: String? = null,
+    /** False for notes ("no stores near…", "search again when ready"); red is only for failures. */
+    val messageIsError: Boolean = true
 )
 
 data class DealUiState(

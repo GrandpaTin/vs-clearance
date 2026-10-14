@@ -116,7 +116,7 @@ class SearchMatcher(query: String) {
 
     fun matches(item: DealItem): Boolean {
         if (tokens.isEmpty()) return true
-        val hay = normalize(listOfNotNull(item.brand, item.title, item.category, item.form).joinToString(" "))
+        val hay = item.searchText
         val squashedHay = hay.replace(" ", "")
         if (squashedQuery.isNotEmpty() && squashedHay.contains(squashedQuery)) return true
         return tokens.all { token -> hay.contains(token) || squashedHay.contains(token) }
@@ -126,10 +126,12 @@ class SearchMatcher(query: String) {
         fun normalize(text: String): String {
             val decomposed = Normalizer.normalize(text, Normalizer.Form.NFD)
             return decomposed
-                .replace(Regex("\\p{M}+"), "")
+                .replace(MARKS, "")
                 .lowercase(Locale.US)
-                .replace(Regex("[^a-z0-9]+"), " ")
+                .replace(NON_ALNUM, " ")
                 .trim()
         }
+        private val MARKS = Regex("\\p{M}+")
+        private val NON_ALNUM = Regex("[^a-z0-9]+")
     }
 }

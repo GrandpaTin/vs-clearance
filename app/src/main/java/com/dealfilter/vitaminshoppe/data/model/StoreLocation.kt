@@ -34,6 +34,6 @@ data class StoreLocation(
             if (it < 10) String.format(Locale.US, "%.1f mi", it) else String.format(Locale.US, "%.0f mi", it)
         } ?: ""
 
-    /** True when the store can actually be used for in-store pickup right now. */
-    val isSelectable: Boolean get() = pickupEnabled && !temporarilyClosed
+    /** True when the store's shelves can be checked: open now (walk-in-only stores count). */
+    val isSelectable: Boolean get() = !temporarilyClosed
 }
