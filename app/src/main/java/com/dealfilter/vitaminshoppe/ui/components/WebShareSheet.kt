@@ -73,7 +73,8 @@ fun WebShareSheet(
     onSave: (gitHubRepo: String, gitHubToken: String, serverUrl: String, serverToken: String, enabled: Boolean) -> Unit,
     onToggle: (Boolean) -> Unit,
     onPublishNow: () -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onNotSaved: (String) -> Unit = {}
 ) {
     val context = LocalContext.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -91,6 +92,7 @@ fun WebShareSheet(
     ModalBottomSheet(
         onDismissRequest = {
             if (dirty && !repoInvalid) onSave(repo, repoToken, server, serverToken, share.enabled || !share.isConfigured)
+            else if (dirty) onNotSaved("Sharing changes not saved — the repo address should look like github.com/owner/repo")
             onDismiss()
         },
         sheetState = sheetState

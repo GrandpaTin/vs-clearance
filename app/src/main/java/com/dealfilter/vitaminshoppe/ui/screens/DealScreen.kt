@@ -102,6 +102,7 @@ import com.dealfilter.vitaminshoppe.ui.theme.NavyPrimary
 import com.dealfilter.vitaminshoppe.ui.theme.SkyBlueSecondary
 import com.dealfilter.vitaminshoppe.ui.viewmodel.DealActions
 import com.dealfilter.vitaminshoppe.ui.viewmodel.DealUiState
+import com.dealfilter.vitaminshoppe.data.remote.WebPublisher
 import com.dealfilter.vitaminshoppe.data.remote.WebShareState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.ui.semantics.liveRegion
@@ -136,7 +137,8 @@ fun DealScreen(viewModel: DealViewModel, modifier: Modifier = Modifier) {
             onSave = viewModel::saveWebShare,
             onToggle = viewModel::setWebShareEnabled,
             onPublishNow = viewModel::publishNow,
-            onDismiss = viewModel::closeWebShare
+            onDismiss = viewModel::closeWebShare,
+            onNotSaved = viewModel::showMessage
         )
     }
     state.pendingPairing?.let { (url, _) ->
@@ -144,9 +146,15 @@ fun DealScreen(viewModel: DealViewModel, modifier: Modifier = Modifier) {
             onDismissRequest = viewModel::rejectPairing,
             title = { Text("Share deals to the web?") },
             text = {
+                val repo = WebPublisher.gitHubRepo(url)
+                val target = repo?.let { "GitHub (${it.first}/${it.second})" } ?: WebPublisher.normalizeUrl(url).removePrefix("https://")
+                val current = if (repo != null) state.webShare.gitHubRepo.takeIf { it.isNotBlank() && WebPublisher.gitHubRepo(it) != repo }
+                    ?.let { WebPublisher.gitHubRepo(it)?.let { r -> "GitHub (${r.first}/${r.second})" } ?: it }
+                else state.webShare.serverUrl.takeIf { it.isNotBlank() && it != WebPublisher.normalizeUrl(url) }?.removePrefix("https://")
                 Text(
-                    "This link asks VS Clearance to publish your deal list to " +
-                        (android.net.Uri.parse(url).host ?: url) + ". Only accept links you made yourself."
+                    "This link asks VS Clearance to publish your deal list to $target." +
+                        (current?.let { " It replaces your current setup ($it) and its token." } ?: "") +
+                        " Only accept links you made yourself."
                 )
             },
             confirmButton = { Button(onClick = viewModel::acceptPairing) { Text("Share there") } },
@@ -349,7 +357,8 @@ fun DealScreenContent(state: DealUiState, viewModel: DealActions, modifier: Modi
                             categories = state.categories,
                             selected = state.category,
                             onToggle = viewModel::onCategoryToggle,
-                            changeCount = state.changes.count,
+                            // Counted where the user is looking: in pickup, only changed items on this shelf.
+                            changeCount = changedInMode(state),
                             onlyChanges = state.onlyChanges,
                             onOnlyChanges = viewModel::onOnlyChanges
                         )
@@ -482,12 +491,21 @@ fun DealScreenContent(state: DealUiState, viewModel: DealActions, modifier: Modi
 /** mode, discount, categories — the sticky summary header is the next item. */
 private const val HEADER_ITEMS = 3
 
+private fun changedInMode(state: DealUiState): Int {
+    val ids = state.changes.newIds + state.changes.priceDrops.keys
+    if (ids.isEmpty()) return 0
+    val pickup = state.mode == FulfillmentMode.PICKUP && state.selectedStore != null
+    return state.allDeals.count { it.id in ids && (!pickup || it.isInStockAtStore) }
+}
+
 private fun clearDescription(state: DealUiState): String {
     val parts = listOfNotNull(
         "search".takeIf { state.query.isNotBlank() },
         "category".takeIf { state.category != null },
-        "discount".takeIf { state.discountFloor != DiscountFloor.ANY }
+        "discount".takeIf { state.discountFloor != DiscountFloor.ANY },
+        "new and price drops".takeIf { state.onlyChanges }
     )
+    if (parts.isEmpty()) return "Clear filters"
     return "Clear " + when (parts.size) {
         0, 1 -> parts.firstOrNull() ?: "filters"
         else -> parts.dropLast(1).joinToString(", ") + " and " + parts.last()
@@ -516,12 +534,14 @@ private fun NoMatches(state: DealUiState, viewModel: DealActions) {
         state.query.takeIf { it.isNotBlank() }?.let { "matching “${it.trim()}”" },
         state.category?.let { "in $it" },
         state.discountFloor.takeIf { it != DiscountFloor.ANY }?.let { "at ${it.label} off" },
-        "in stock online".takeIf { state.mode == FulfillmentMode.SHIP && state.inStockOnly }
+        "in stock online".takeIf { state.mode == FulfillmentMode.SHIP && state.inStockOnly },
+        "new or cheaper since your last check".takeIf { state.onlyChanges }
     )
     val body = if (reasons.isEmpty()) "Nothing on clearance$atStore right now. Pull down to refresh."
     else "Nothing on clearance$atStore ${reasons.joinToString(", ")}."
-    val onlyStockFilter = state.query.isBlank() && state.category == null && state.discountFloor == DiscountFloor.ANY
+    val onlyStockFilter = state.query.isBlank() && state.category == null && state.discountFloor == DiscountFloor.ANY && !state.onlyChanges
     val fixes = listOfNotNull(
+        ("Show all deals" to { viewModel.onOnlyChanges(false) }).takeIf { state.onlyChanges },
         state.query.takeIf { it.isNotBlank() }?.let { "Clear search" to viewModel::clearSearch },
         state.category?.let { "All categories" to viewModel::clearCategory },
         state.discountFloor.takeIf { it != DiscountFloor.ANY }?.let { "Any discount" to { viewModel.onDiscountFloor(DiscountFloor.ANY) } },

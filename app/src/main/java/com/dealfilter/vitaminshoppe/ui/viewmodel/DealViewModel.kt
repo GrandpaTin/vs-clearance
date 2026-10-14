@@ -91,6 +91,9 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
     private var stockRetryJob: Job? = null
     private var stockFailures = 0
 
+    /** The store whose running stock check will announce its shelf count when done. */
+    private var announcingFor: String? = null
+
     /** When the user closed the site's check; automatic refreshes leave them alone for a while after. */
     private var verificationDeclinedAt = 0L
 
@@ -189,6 +192,8 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
     private suspend fun onNetworkAvailable() {
         // Let the new connection settle; the first requests on a just-joined network often fail.
         delay(1_500)
+        // The callback fires right at start-up: decide against the saved list, not an empty one.
+        restoreJob.join()
         val s = _uiState.value
         val now = System.currentTimeMillis()
         val offlineRetry = s.loadErrorIsOffline && !s.isVerificationVisible && now - verificationDeclinedAt >= STALE_AFTER_MS
@@ -337,6 +342,9 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
 
     /** All stock loads go through here so a newer store always cancels the older load. */
     private fun startStockLoad(store: StoreLocation, announce: Boolean = false, quiet: Boolean = false) {
+        // A check that was going to announce "N on the shelf" for this store still does when restarted.
+        val announceNow = announce || (stockJob?.isActive == true && announcingFor == store.storeId)
+        announcingFor = if (announceNow) store.storeId else null
         stockJob?.cancel()
         val items = _uiState.value.allDeals
         if (items.isEmpty()) {
@@ -354,7 +362,7 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
                     val onShelf = updated.count { it.isInStockAtStore }
                     state.copy(
                         allDeals = updated,
-                        message = if (announce) "$onShelf clearance items on the shelf at ${store.name}" else state.message
+                        message = if (announceNow) "$onShelf clearance items on the shelf at ${store.name}" else state.message
                     ).withDerived()
                 }
                 val s = _uiState.value
@@ -393,7 +401,7 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
         stockJob = job
         job.invokeOnCompletion {
             // Only the current job may clear the spinner; a cancelled older one must not.
-            if (stockJob === job) _uiState.update { it.copy(isStockLoading = false) }
+            if (stockJob === job) { announcingFor = null; _uiState.update { it.copy(isStockLoading = false) } }
         }
     }
 
@@ -679,6 +687,9 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
 
     /** User closed the sheet; don't retry behind their back (the banner keeps a Verify button). */
     fun cancelVerification() {
+        if (afterVerification.containsKey("storeSearch")) {
+            _uiState.update { s -> s.copy(storeSheet = s.storeSheet?.copy(message = "Search again when you're ready.")) }
+        }
         afterVerification.clear()
         verificationDeclinedAt = System.currentTimeMillis()
         session.dismissChallenge()

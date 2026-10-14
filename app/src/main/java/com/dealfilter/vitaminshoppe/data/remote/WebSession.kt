@@ -434,7 +434,8 @@ class WebSession(context: Context) : JsonFetcher {
 
         override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
             if (!request.isForMainFrame) return
-            lastPageError = error.description?.toString()
+            // "net::ERR_CONNECTION_RESET" means nothing to a shopper; the message already says what happened.
+            lastPageError = error.description?.toString()?.takeUnless { it.startsWith("net::") }
             pageState = PageState.FAILED
             pageWaiter?.complete(PageState.FAILED)
         }

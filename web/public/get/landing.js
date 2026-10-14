@@ -9,7 +9,8 @@
     var btn = this;
     var done = function () { btn.textContent = 'Copied!'; setTimeout(function () { btn.textContent = 'Copy link'; }, 2000); };
     if (canShare) {
-      navigator.share({ title: 'VS Clearance', text: 'Vitamin Shoppe clearance deal finder', url: url }).catch(function () {});
+      navigator.share({ title: 'VS Clearance', text: 'Vitamin Shoppe clearance deal finder', url: url })
+        .catch(function (e) { if (!e || e.name !== 'AbortError') fallback(); });
     } else if (navigator.clipboard) {
       navigator.clipboard.writeText(url).then(done, fallback);
     } else {

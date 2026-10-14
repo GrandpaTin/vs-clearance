@@ -3,11 +3,20 @@ const VERSION = 'vs-web-5';
 const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'core.js', 'boot-check.js', 'manifest.webmanifest', 'get/', 'get/landing.js',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'];
 
+// Saves a response as the offline list only if it really is one.
+function saveIfList(res) {
+  return res.clone().json().then((j) => {
+    if (!j || !Array.isArray(j.items)) return;
+    const headers = new Headers(res.headers);
+    return caches.open(VERSION).then((c) => c.put('api/snapshot', new Response(JSON.stringify(j), { status: 200, headers })));
+  }).catch(() => {});
+}
+
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: 'reload' })))
     // Best effort: a missing or failed list mustn't stop the worker installing.
     .then(() => Promise.race([
-      fetch('api/snapshot', { cache: 'no-cache' }).then((r) => (r.ok ? c.put('api/snapshot', r) : null)).catch(() => null),
+      fetch('api/snapshot', { cache: 'no-cache' }).then((r) => (r.ok ? saveIfList(r) : null)).catch(() => null),
       new Promise((resolve) => setTimeout(resolve, 8000)) // a hung download mustn't hold up the offline shell
     ])))
     .then(() => self.skipWaiting()));
@@ -38,8 +47,9 @@ self.addEventListener('fetch', (e) => {
     });
     // Abandoned 30 s after the saved copy answered, so polls on a dead connection don't pile up.
     const ctrl = new AbortController();
+    if (e.request.signal) e.request.signal.addEventListener('abort', () => ctrl.abort());
     const network = fetch(new Request(e.request, { signal: ctrl.signal })).then((res) => {
-      if (res.ok) { const copy = res.clone(); caches.open(VERSION).then((c) => c.put('api/snapshot', copy)); }
+      if (res.ok) saveIfList(res);
       return res;
     });
     network.catch(() => {}); // if the saved copy wins, a later network failure is no one's business

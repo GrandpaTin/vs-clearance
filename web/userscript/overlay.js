@@ -198,8 +198,9 @@ import {
         // the title already says "Quick check needed"; the body says what for and what to do
         state.stockError = state.stockBlocked
           ? `Vitamin Shoppe wants to confirm a person is browsing before showing stock at ${store.name}. Tap Reload page, complete any check, and Deals reopens.`
-          : (reached ? `Couldn't check ${missing} of ${total} items at ${store.name}. ` : '') +
-            `${e.message.replace(/\.?$/, '.')} ${connection ? 'Check your connection and try again.' : 'Tap Retry, or it will try again later.'}`;
+          : (reached ? `Couldn't check ${missing} of ${total} items at ${store.name}. ` : `Couldn't re-check shelf stock at ${store.name}. `) +
+            `${e.message.replace(/\.?$/, '.')}`;
+        state.stockAdvice = connection ? 'Check your connection and try again.' : 'Tap Retry, or it will try again later.';
       }
     } finally {
       if (run === stockRun) { state.stockLoading = false; render(); }
@@ -228,7 +229,7 @@ import {
     }
     state.shareStatus = { at: error ? state.shareStatus?.at || null : Date.now(), error };
     put('shareStatus', state.shareStatus);
-    renderShareLine();
+    keepFocus(renderShareLine);
   }
 
   function renderShareLine() {
@@ -302,7 +303,7 @@ import {
         <div class="summary" data-ref="summary"></div>
         <span class="vh" data-ref="live" role="status" aria-live="polite"></span>
         <ul class="list" data-ref="list"></ul>
-        <div class="status" data-ref="status" hidden></div>
+        <div class="status" data-ref="status" role="status" hidden></div>
         <div class="share-line" data-ref="shareLine" hidden></div>
         <p class="foot-note" data-ref="footNote"></p>
       </div>
@@ -355,7 +356,7 @@ import {
       const n = changeIds().size;
       ref('subtitle').textContent = `Updated ${relativeTime(state.savedAt)}` + (n ? ` · ${n} new or cheaper` : '');
     }
-    renderBanner();
+    keepFocus(renderBanner);
   }, 60_000);
 
   function closeApp() {
@@ -400,20 +401,29 @@ import {
   const setList = setHtml;
   // What identifies a control across re-renders, most specific first.
   const FOCUS_KEYS = ['act', 'card', 'ref', 'key'];
-  function render() {
+  /**
+   * Runs a re-render and, if it replaced the focused control, puts focus back on the same one
+   * (preferring the same region: the status panel's Retry, not the header's) or on the app, so Tab
+   * doesn't start over or wander onto the page underneath.
+   */
+  function keepFocus(fn) {
     const a = root.activeElement;
     const ds = a && a.dataset ? a.dataset : {};
     const kind = FOCUS_KEYS.find((k) => ds[k] != null);
     const id = kind && ds[kind], v = ds.v;
-    renderNow();
-    // Rebuilt controls drop keyboard focus: put it back on the same one (or the app) so Tab
-    // doesn't start over or wander onto the page underneath.
+    const regionEl = a && a.parentElement ? a.parentElement.closest('[data-ref]') : null;
+    const region = regionEl ? regionEl.dataset.ref : null;
+    fn();
     if (kind && state.open && !(root.activeElement && root.activeElement.isConnected)) {
-      const all = [...root.querySelectorAll(`[data-${kind}]`)].filter((el) => el.dataset[kind] === id);
-      const same = (v == null ? null : all.find((el) => el.dataset.v === v)) || all[0];
-      (same && same.offsetParent ? same : app).focus({ preventScroll: true });
+      const all = [...root.querySelectorAll(`[data-${kind}]`)].filter((el) => el.dataset[kind] === id && el.offsetParent);
+      const pick = (list) => (v == null ? null : list.find((el) => el.dataset.v === v)) || list[0];
+      const inRegion = region ? all.filter((el) => { const r = el.parentElement && el.parentElement.closest('[data-ref]'); return r && r.dataset.ref === region; }) : [];
+      const same = pick(inRegion) || pick(all);
+      (same || app).focus({ preventScroll: true });
+      if (same && same.classList.contains('chip')) same.scrollIntoView({ inline: 'nearest', block: 'nearest' });
     }
   }
+  function render() { keepFocus(renderNow); }
   function renderNow() {
     if (!state.open) return;
     renderFootNote();
@@ -445,7 +455,7 @@ import {
     render.say = setTimeout(() => { if (ref('live').textContent !== said) ref('live').textContent = said; }, 700);
     setHtml(ref('summary'), `<span class="count" aria-hidden="true">${deals.length === total ? `${total} deals` : `${deals.length} of ${total}`}</span>
       ${deals.length ? `<button class="tonal-btn" data-act="ai">🧠 Ask AI (${Math.min(deals.length, AI_MAX_ITEMS)})</button>` : ''}
-      <label class="sort"><span class="vh">Sort by</span><select data-ref="sort">${SORTS.map((o) => `<option value="${o.id}"${o.id === state.sort ? ' selected' : ''}>⇅ ${esc(o.short)}</option>`).join('')}</select></label>`);
+      <label class="sort"><span class="vh">Sort by</span><span aria-hidden="true">⇅</span><select data-ref="sort">${SORTS.map((o) => `<option value="${o.id}"${o.id === state.sort ? ' selected' : ''}>${esc(o.short)}</option>`).join('')}</select></label>`);
     if (state.mode === 'pickup' && state.stockLoading && !deals.length) {
       setList(list, ''); status.hidden = false;
       status.innerHTML = statusHtml('🏬', 'Checking shelves…', `Looking up stock at ${esc(state.store.name)}.`);
@@ -474,10 +484,10 @@ import {
   function renderBanner() {
     let html = '';
     if (state.blocked && state.items.length) {
-      html = `<div class="banner warn"><span><b>Quick check needed</b> to refresh · ${savedPhrase()}. Reload, complete Vitamin Shoppe's check, and Deals reopens.</span>
+      html = `<div class="banner warn" role="status"><span><b>Quick check needed</b> to refresh · ${savedPhrase()}. Reload, complete Vitamin Shoppe's check, and Deals reopens.</span>
         <button class="text-btn" data-act="reload-page">Reload page</button></div>`;
     } else if (state.error && state.items.length) {
-      html = `<div class="banner warn"><span><b>Couldn't refresh.</b> ${esc(state.error.replace(/\.$/, ''))} · ${savedPhrase()}.</span>` +
+      html = `<div class="banner warn" role="status"><span><b>Couldn't refresh.</b> ${esc(state.error.replace(/\.$/, ''))} · ${savedPhrase()}.</span>` +
         (state.siteChanged ? `<a class="text-btn" href="${esc(__VSX_HOME__)}vs-clearance.user.js" target="_blank" rel="noopener">Update</a>` : '') +
         '<button class="text-btn" data-act="refresh">Retry</button></div>';
     } else if (state.partialNote) {
@@ -489,7 +499,7 @@ import {
       // (In pickup with nothing to show, the full-page panel below says it instead.)
       // The age only matters when the counts on screen are from an earlier check.
       const age = hasStock() && Date.now() - state.stock.at > 10 * 60_000 ? ` · showing stock checked ${relativeTime(state.stock.at)}` : '';
-      html = `<div class="banner bad"><span>${esc(state.stockError.replace(/\.$/, ''))}${age}.</span><button class="text-btn" data-act="${state.stockBlocked ? 'reload-page' : 'retry-stock'}">${state.stockBlocked ? 'Reload page' : 'Retry'}</button></div>`;
+      html = `<div class="banner bad" role="status"><span>${esc(state.stockError.replace(/\.$/, ''))}${age}.${state.stockAdvice ? ' ' + esc(state.stockAdvice) : ''}</span><button class="text-btn" data-act="${state.stockBlocked ? 'reload-page' : 'retry-stock'}">${state.stockBlocked ? 'Reload page' : 'Retry'}</button></div>`;
     } else if (hasStock() && !state.stockLoading && Date.now() - (state.stock.at || 0) > 6 * 3600e3) {
       // 7. shelf stock's age said once, not on every card
       html = `<div class="banner info"><span>Shelf stock at ${esc(state.store.name)} was checked ${relativeTime(state.stock.at)}.</span><button class="text-btn" data-act="retry-stock">Check now</button></div>`;
@@ -508,7 +518,9 @@ import {
     const cats = topCategories(state.items);
     if (state.category && !cats.includes(state.category)) cats.unshift(state.category);
     const n = changeIds().size;
-    ref('controls').innerHTML = `
+    const rows = [...ref('controls').querySelectorAll('.chips')].map((r) => r.scrollLeft);
+    const before = ref('controls')._html;
+    setHtml(ref('controls'), `
       <div class="segmented" role="radiogroup" aria-label="Fulfillment">
         <button role="radio" data-act="mode" data-v="ship" aria-checked="${state.mode === 'ship'}" tabindex="${state.mode === 'ship' ? 0 : -1}">Ship</button>
         <button role="radio" data-act="mode" data-v="pickup" aria-checked="${state.mode === 'pickup'}" tabindex="${state.mode === 'pickup' ? 0 : -1}">Pick up</button>
@@ -519,7 +531,8 @@ import {
         <span aria-hidden="true">▾</span>
       </button>
       <div class="chips">${chips.join('')}</div>
-      <div class="chips">${n ? `<button class="chip" data-act="changes" aria-pressed="${state.onlyChanges}">✨ New & price drops (${n})</button>` : ''}${cats.map((c) => `<button class="chip" data-act="cat" data-v="${esc(c)}" aria-pressed="${state.category === c}">${esc(c)}</button>`).join('')}</div>`;
+      <div class="chips">${n ? `<button class="chip" data-act="changes" aria-pressed="${state.onlyChanges}">✨ New & price drops (${n})</button>` : ''}${cats.map((c) => `<button class="chip" data-act="cat" data-v="${esc(c)}" aria-pressed="${state.category === c}">${esc(c)}</button>`).join('')}</div>`);
+    if (ref('controls')._html !== before) ref('controls').querySelectorAll('.chips').forEach((r, i) => { r.scrollLeft = rows[i] || 0; });
   }
 
   function cardHtml(d) {
@@ -655,8 +668,14 @@ import {
         // Back where they were after the check: the store sheet reopens (and searches) if it was open.
         try { if (state.sheet === 'stores') sessionStorage.setItem('vsx.reopen', 'stores'); } catch { /* private mode */ }
         location.hash = 'vsdeals'; return location.reload();
-      case 'hide-launcher': put('launcher', false); renderFootNote(); return toast('Deals button hidden — open again from vitaminshoppe.com/#vsdeals');
-      case 'show-launcher': put('launcher', true); renderFootNote(); return toast('Deals button is back');
+      case 'hide-launcher':
+      case 'show-launcher': {
+        const show = el.dataset.act === 'show-launcher';
+        put('launcher', show); renderFootNote();
+        const swapped = root.querySelector(`[data-act="${show ? 'hide-launcher' : 'show-launcher'}"]`);
+        if (swapped) swapped.focus({ preventScroll: true });
+        return toast(show ? 'Deals button is back' : 'Deals button hidden — open again from vitaminshoppe.com/#vsdeals');
+      }
       case 'mode':
         if (v === 'pickup' && !state.store) return openSheet('stores');
         return update(() => { state.mode = v; });
@@ -665,7 +684,13 @@ import {
       case 'instock': return update(() => { state.inStockOnly = !state.inStockOnly; });
       case 'cat': return update(() => { state.category = state.category === v ? null : v; });
       case 'changes': return update(() => { state.onlyChanges = !state.onlyChanges; });
-      case 'clear': return update(() => { state.query = ''; ref('q').value = ''; state.category = null; state.floor = 0; state.onlyChanges = false; });
+      case 'clear': {
+        update(() => { state.query = ''; ref('q').value = ''; state.category = null; state.floor = 0; state.onlyChanges = false; });
+        // The Clear chip itself is gone: continue from the first chip in its row.
+        const first = ref('controls').querySelector('.chips .chip');
+        if (first && root.activeElement === app) first.focus({ preventScroll: true });
+        return;
+      }
       case 'clear-search': return update(() => { state.query = ''; ref('q').value = ''; });
       case 'clear-cat': return update(() => { state.category = null; });
       case 'any-floor': return update(() => { state.floor = 0; });
@@ -674,7 +699,7 @@ import {
       case 'close-sheet': return closeSheet();
       case 'stop-share':
         state.share = null; state.shareStatus = null; put('share', null); put('shareStatus', null);
-        renderShareLine(); toast('Stopped sharing from this browser');
+        keepFocus(renderShareLine); toast('Stopped sharing from this browser');
         return;
       case 'pick-store': {
         const s = storeSearch.results.find((x) => x.id === el.dataset.id);

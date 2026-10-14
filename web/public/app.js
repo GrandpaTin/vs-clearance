@@ -86,7 +86,7 @@ async function load({ manual = false } = {}) {
       if (state.snapshot) throw new Error('HTTP 404'); // keep the list; say the check failed
       state.snapshot = null; state.error = 'empty'; return;
     }
-    if (!res.ok) throw new Error('HTTP ' + res.status);
+    if (!res.ok) throw Object.assign(new Error('HTTP ' + res.status), { status: res.status });
     // The service worker answers with its saved copy when the network is down.
     const via = res.headers.get('X-From-Cache');
     const fromCache = !!via;
@@ -118,7 +118,7 @@ async function load({ manual = false } = {}) {
   } catch (e) {
     if (abort.superseded) { changed = false; return; } // a newer attempt took over
     if (e && e.unreadable) state.etag = null;
-    const failure = navigator.onLine === false ? 'offline' : e && e.unreadable ? 'bad' : 'failed';
+    const failure = navigator.onLine === false ? 'offline' : e && e.unreadable ? 'bad' : e && e.status >= 500 ? 'server' : 'failed';
     if (!manual && !wasLoading && state.snapshot && failure !== 'offline' && ++quietFailures < 2) {
       changed = false;
       return; // flaky mobile data: wait for the next check before warning
@@ -293,6 +293,7 @@ function renderBody() {
       : statusHtml('⚠️', 'Couldn’t load deals', state.error === 'offline' || navigator.onLine === false
         ? 'You seem to be offline. Check your connection and try again.'
         : state.error === 'bad' ? 'The shared list couldn’t be read. Try again in a minute.'
+        : state.error === 'server' ? 'The deals server had a problem. Try again in a minute.'
         : 'The deals server didn’t answer. Try again in a minute.', [['Try again', 'retry', true]]);
     return;
   }
@@ -416,7 +417,9 @@ function renderControls() {
       <option value="">More categories…</option>${more.map((c) => `<option value="${esc(c)}">${esc(c)} (${countIn(c)})</option>`).join('')}</select></label>`] : [])
   ];
   if (coarse) {
-    const pri = (h) => /data-act="cat"[^>]*aria-pressed="true"/.test(h) ? 0 : h.includes('chip more') ? 1 : 2;
+    // "More" comes second only when the active category came from it (so the choice is visible).
+    const fromMore = !!state.category && !cats.slice(1).includes(state.category) && !live.slice(0, 8).includes(state.category);
+    const pri = (h) => /data-act="cat"[^>]*aria-pressed="true"/.test(h) ? 0 : h.includes('chip more') ? (fromMore ? 1 : 4) : h.includes('data-act="changes"') ? 2 : 3;
     catChips.sort((a, b) => pri(a) - pri(b));
   }
   $('cat-chips').innerHTML = catChips.join('');
@@ -481,7 +484,10 @@ function statusHtml(icon, title, body, actions = []) {
 
 function noMatchesHtml() {
   if (!state.items.length) {
-    return statusHtml('🏷️', 'No deals in this list yet', 'The person who shared it hasn’t published any deals yet. Check back later, or get the app to browse every clearance deal yourself.', [['Get the app', 'get', true]]);
+    const when = state.snapshot && (state.snapshot.savedAt || state.snapshot.publishedAt);
+    return statusHtml('🏷️', 'No deals in this list', when
+      ? `The last shared list (${relativeTime(when)}) had no deals on it. Check back later, or get the app to browse every clearance deal yourself.`
+      : 'The person who shared it hasn’t published any deals yet. Check back later, or get the app to browse every clearance deal yourself.', [['Get the app', 'get', true]]);
   }
   const store = state.snapshot.store;
   const atStore = state.mode === 'pickup' && store ? ` at ${esc(store.name)}` : '';
@@ -605,6 +611,7 @@ $('list').addEventListener('error', (e) => {
 }, true);
 
 let typing;
+$('q').disabled = false; // enabled once the app is running (see index.html)
 $('q').addEventListener('input', (e) => {
   $('q-clear').hidden = !e.target.value;
   clearTimeout(typing);
@@ -693,7 +700,12 @@ $('copy-prompt').addEventListener('click', async () => {
   btn.timer = setTimeout(() => { btn.textContent = 'Copy prompt'; }, 2500);
 });
 $('share-prompt').addEventListener('click', async () => {
-  try { await navigator.share({ title: 'Vitamin Shoppe clearance deals to review', text: promptText }); } catch { /* cancelled */ }
+  try {
+    await navigator.share({ title: 'Vitamin Shoppe clearance deals to review', text: promptText });
+  } catch (e) {
+    if (e && e.name === 'AbortError') return; // closed the share sheet
+    $('copy-prompt').click(); // in-app browsers refuse share: copy (or select) the prompt instead
+  }
 });
 $('prompt-dialog').addEventListener('click', (e) => { if (e.target === $('prompt-dialog')) $('prompt-dialog').close(); });
 

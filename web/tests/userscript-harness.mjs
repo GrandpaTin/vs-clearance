@@ -135,8 +135,11 @@ await run('07-launcher', { fn: async (page, app) => {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vsshare-'));
   const port = 5600 + Math.floor(Math.random() * 300);
   const srv = spawn(process.execPath, [path.join(root, 'server.mjs')], { env: { ...process.env, PORT: String(port), VS_DATA: dataDir, QUIET: '1' }, stdio: 'ignore' });
-  await new Promise((r) => setTimeout(r, 800));
-  const token = JSON.parse(fs.readFileSync(path.join(dataDir, 'config.json'), 'utf8')).token;
+  // A busy PC can take a while to start the server: wait for its config (up to 10 s).
+  const cfg = path.join(dataDir, 'config.json');
+  for (let i = 0; i < 100 && !fs.existsSync(cfg); i++) await new Promise((r) => setTimeout(r, 100));
+  await new Promise((r) => setTimeout(r, 300));
+  const token = JSON.parse(fs.readFileSync(cfg, 'utf8')).token;
   const pair = Buffer.from(JSON.stringify({ url: 'https://share.test', token })).toString('base64url');
   try {
     await run('08-share', { fn: async (page, app) => {
