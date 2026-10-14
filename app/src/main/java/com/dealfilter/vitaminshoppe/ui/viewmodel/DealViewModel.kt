@@ -100,6 +100,12 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
     /** Whether the running stock check was started in the background (vs. by the user). */
     private var stockJobQuiet = true
 
+    /** A store the user picked before there was a list to check against. */
+    private var pendingUserStock: String? = null
+
+    /** The query of the last store search sent (to skip an identical repeat). */
+    private var storeSearchQuery: String? = null
+
     /** When the user closed the site's check; automatic refreshes leave them alone for a while after. */
     private var verificationDeclinedAt = 0L
 
@@ -254,7 +260,7 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
                 inStockOnly = prefs.inStockOnly,
                 category = prefs.category,
                 allDeals = items,
-                lastUpdatedMillis = cache?.savedAtMillis,
+                lastUpdatedMillis = cache?.savedAtMillis?.takeIf { it > 0 },
                 changes = ListChanges(cache?.newIds.orEmpty(), cache?.priceDrops.orEmpty()),
                 isShowingSavedData = items.isNotEmpty(),
                 // With a saved list there's something to show; with none, the first refresh is coming.
@@ -326,13 +332,20 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
                 }
                 autoFailures = 0
                 userWaiting = false
+                if (categoryDropped) { categoryDropped = false; savePreferences() }
                 // Save the fresh list now, keeping the last good stock for the same store until
                 // the new stock check finishes (it may fail or the app may be killed meanwhile).
                 val store = _uiState.value.selectedStore
                 // With a store, the stock check that follows publishes (once, with fresh stock).
                 persistCache(items, now, carried?.first, carried?.second ?: emptyMap(), publish = store == null)
                 // A stock check the user started (picking a store) stays a user action when restarted.
-                if (store != null) startStockLoad(store, quiet = auto && !(stockJob?.isActive == true && !stockJobQuiet)) else stockJob?.cancel()
+                val userPicked = store != null && pendingUserStock == store.storeId
+                pendingUserStock = null
+                if (store != null) startStockLoad(
+                    store,
+                    announce = userPicked,
+                    quiet = auto && !userPicked && !(stockJob?.isActive == true && !stockJobQuiet)
+                ) else stockJob?.cancel()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: FetchException.VerificationRequired) {
@@ -368,6 +381,9 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
         stockJob?.cancel()
         val items = _uiState.value.allDeals
         if (items.isEmpty()) {
+            // Nothing to check yet (first load still running): the refresh that brings the list runs
+            // this store's check as the user's own, announced.
+            if (!quiet) pendingUserStock = store.storeId
             _uiState.update { it.copy(isStockLoading = false) }
             return
         }
@@ -512,6 +528,7 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
             if (!announce) return@launch
             showMessage(
                 when {
+                    error == WebPublisher.SUPERSEDED -> error
                     publisher.state.value.pending -> "Saved for later — " + (publisher.state.value.pendingReason ?: "it will sync when online").replaceFirstChar { it.lowercase() }
                     error != null -> error
                     publisher.state.value.isGitHub -> "Published ${s.allDeals.size} deals — live on the site in about a minute"
@@ -623,6 +640,9 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
     override fun searchStores() {
         val sheet = _uiState.value.storeSheet ?: return
         val query = sheet.query.trim()
+        // Already searching (or already showing results) for exactly this: nothing new to ask the site.
+        if (query == storeSearchQuery && (sheet.isSearching || (sheet.hasSearched && sheet.results.isNotEmpty() && sheet.message == null))) return
+        storeSearchQuery = query
         val problem = validateStoreQuery(query)
         if (problem != null) {
             _uiState.update { it.copy(storeSheet = sheet.copy(message = problem, results = emptyList(), hasSearched = true)) }

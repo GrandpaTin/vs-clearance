@@ -145,11 +145,26 @@ async function load({ manual = false } = {}) {
 
 function acceptSnapshot(snap) {
   if (!snap || !Array.isArray(snap.items)) throw new Error('not a deals list');
-  const when = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : typeof v === 'string' ? Date.parse(v) || null : null);
+  // A time in seconds is converted; one before 2020 or more than a day ahead is unknown (null).
+  const when = (v) => {
+    let t = typeof v === 'number' && Number.isFinite(v) ? v : typeof v === 'string' ? Date.parse(v) || null : null;
+    if (t != null && t > 1e9 && t < 1e11) t *= 1000;
+    return t != null && t >= Date.UTC(2020, 0, 1) && t <= Date.now() + 864e5 ? t : null;
+  };
   snap.publishedAt = when(snap.publishedAt);
   snap.savedAt = when(snap.savedAt);
-  // Stock must be a plain { sku: count } object; anything else just means "no shelf stock".
+  // Stock must be a plain { sku: count } object of whole numbers; anything else just means "no shelf stock".
   if (!snap.stock || typeof snap.stock !== 'object' || Array.isArray(snap.stock)) snap.stock = null;
+  else snap.stock = Object.fromEntries(Object.entries(snap.stock).filter(([, n]) => Number.isFinite(Number(n)) && Number(n) >= 0)
+    .map(([k, n]) => [k, Math.floor(Number(n))]));
+  // A store needs an id; a missing name reads as its address (or "your store"), never "undefined".
+  if (!snap.store || typeof snap.store !== 'object' || snap.store.id == null) snap.store = null;
+  else {
+    snap.store.id = String(snap.store.id);
+    const name = typeof snap.store.name === 'string' && snap.store.name.trim();
+    snap.store.name = name || storeAddress(snap.store) || 'your store';
+  }
+  if (snap.stockStoreId != null) snap.stockStoreId = String(snap.stockStoreId);
   const stock = snap.stockStoreId && snap.store && snap.stockStoreId === snap.store.id ? snap.stock : null;
   // One malformed row (no id, link or price) is skipped rather than taking the whole list down,
   // and a repeated id keeps its first row (shares, marks and cards are keyed by id).
@@ -620,6 +635,9 @@ async function retryFirstLoad() {
   await Promise.all([load({ manual: true }), new Promise((r) => setTimeout(r, 400))]);
   if (state.error === 'offline') toast('Still offline — check your connection.');
   else if (state.error === 'empty') toast('Still nothing shared yet — check back later.');
+  else if (state.error === 'server') toast('The deals server still has a problem — try again in a minute.');
+  else if (state.error === 'bad') toast('Still couldn’t read the list — try again in a minute.');
+  else if (state.error === 'stalled') toast('Still loading — your connection is slow.');
   else if (state.error) toast('Still no answer from the deals server — try again in a minute.');
   const again = document.querySelector('#status [data-act="retry"]');
   if (again) again.focus();

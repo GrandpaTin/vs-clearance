@@ -36,7 +36,7 @@ export function normalizeItem(o, stock) {
     title: txt(o.title) || String(o.id),
     url: o.url.replace(/^http:\/\//i, 'https://'),
     img: typeof o.img === 'string' && /^https?:\/\//i.test(o.img) ? o.img.replace(/^http:\/\//i, 'https://') : null,
-    list: Math.max(Number(o.list) || 0, Number(o.site)),
+    list: Math.max(Number.isFinite(Number(o.list)) ? Number(o.list) : 0, Number(o.site)),
     site: Number(o.site),
     adp: pos(o.adp),
     cart: posNum(o.cart),
@@ -45,7 +45,7 @@ export function normalizeItem(o, stock) {
     form: txt(o.form),
     category: txt(o.category),
     variants: txt(o.variants),
-    rating: pos(o.rating),
+    rating: pos(o.rating) != null && o.rating <= 5 ? o.rating : null,
     reviews: posNum(o.reviews) || 0,
     oos: !!o.oos,
     pickup: o.pickup !== false,
@@ -60,8 +60,9 @@ export function cartEstimate(d) {
 }
 export const bestPrice = (d) => cartEstimate(d) ?? d.site;
 export function percentOff(list, price) {
-  if (list <= 0 || price >= list) return 0;
-  return Math.min(99, Math.max(0, Math.round(((list - price) / list) * 100)));
+  if (!(list > 0) || !(price < list)) return 0;
+  const pct = Math.round(((list - price) / list) * 100);
+  return Number.isFinite(pct) ? Math.min(99, Math.max(0, pct)) : 0;
 }
 export const discount = (d) => percentOff(d.list, bestPrice(d));
 export const savings = (d) => Math.max(0, d.list - bestPrice(d));
@@ -323,7 +324,7 @@ export function aiPrompt(deals, total, store, mode) {
   // A store without online pickup: everything there is walk-in only.
   const walkInStore = !!store && store.pickup === false;
   const where = mode === 'pickup' && store
-    ? `on the shelf at ${/vitamin shoppe/i.test(store.name) ? store.name : 'The Vitamin Shoppe, ' + store.name} (${storeAddress(store)})${walkInStore ? ' — walk-in only (this store has no online pickup)' : shown.some((d) => !d.pickup) ? ' — some walk-in only (no online pickup)' : ', all available for store pickup'}`
+    ? `on the shelf at ${/vitamin shoppe/i.test(store.name) ? store.name : 'The Vitamin Shoppe, ' + store.name} ${storeAddress(store) ? ` (${storeAddress(store)})` : ''}${walkInStore ? ' — walk-in only (this store has no online pickup)' : shown.some((d) => !d.pickup) ? ' — some walk-in only (no online pickup)' : ', all available for store pickup'}`
     : store ? `from The Vitamin Shoppe online (stock also checked at ${store.name})` : 'from The Vitamin Shoppe online';
   const scope = total > shown.length
     ? `These are the top ${shown.length} of ${total} deals matching my filters.`

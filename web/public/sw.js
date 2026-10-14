@@ -29,15 +29,33 @@ self.addEventListener('message', (e) => {
 
 self.addEventListener('activate', (e) => {
   e.waitUntil(caches.keys()
-    .then((keys) => Promise.all(keys.filter((k) => k !== VERSION).map((k) => caches.delete(k))))
+    .then((keys) => Promise.all(keys.filter((k) => k !== VERSION && k !== IMG_CACHE).map((k) => caches.delete(k))))
     .then(() => self.clients.claim()));
 });
+
+const IMG_CACHE = 'vs-img';
+const IMG_MAX = 250;
+/** Keeps the photo cache to the newest IMG_MAX pictures. */
+function trimImages(c) {
+  return c.keys().then((keys) => Promise.all(keys.slice(0, Math.max(0, keys.length - IMG_MAX)).map((k) => c.delete(k))));
+}
 
 /** Until when the network counts as hanging (set when a request had to fall back to the saved copy). */
 let slowUntil = 0;
 
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
+  // Product photos (another site): cache-first, so the list still has pictures with no signal.
+  if (e.request.method === 'GET' && e.request.destination === 'image' && url.origin !== self.location.origin) {
+    // Only readable (CORS) answers are kept: opaque ones count as megabytes each against storage
+    // and could get the whole offline copy evicted. A host without CORS just isn't cached.
+    e.respondWith(caches.open(IMG_CACHE).then((c) => c.match(e.request.url).then((hit) => hit ||
+      fetch(e.request.url, { mode: 'cors', credentials: 'omit' }).then((res) => {
+        if (res.ok) c.put(e.request.url, res.clone()).then(() => trimImages(c));
+        return res;
+      }).catch(() => fetch(e.request)))));
+    return;
+  }
   if (e.request.method !== 'GET' || url.origin !== self.location.origin) return;
   if (url.pathname.endsWith('/api/snapshot')) {
     const fromCache = (reason) => caches.match('api/snapshot').then((r) => {

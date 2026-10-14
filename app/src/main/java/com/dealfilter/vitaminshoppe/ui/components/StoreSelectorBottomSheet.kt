@@ -175,6 +175,7 @@ private fun StoreRow(store: StoreLocation, isSelected: Boolean, onSelect: (Store
     val walkInOnly = if (!store.temporarilyClosed && !store.pickupEnabled) "Walk-in only — no online pickup" else null
     Surface(
         onClick = { onSelect(store) },
+        enabled = enabled,
         shape = RoundedCornerShape(12.dp),
         color = if (isSelected) badges.skyBlueContainer else MaterialTheme.colorScheme.surfaceVariant,
         border = if (isSelected) BorderStroke(2.dp, badges.onSkyBlueContainer) else null,
@@ -241,7 +242,8 @@ internal fun todaysHours(lines: List<String>, calendar: Calendar = Calendar.getI
         val parts = label.split(Regex("\\s*[-–]\\s*")).map { p -> days.indexOfFirst { it.equals(p.trim(), ignoreCase = true) } }
         val matches = when (parts.size) {
             1 -> parts[0] == todayIndex
-            2 -> parts[0] >= 0 && parts[1] >= 0 && todayIndex in parts[0]..parts[1]
+            2 -> parts[0] >= 0 && parts[1] >= 0 &&
+                (if (parts[0] <= parts[1]) todayIndex in parts[0]..parts[1] else todayIndex >= parts[0] || todayIndex <= parts[1])
             else -> false
         }
         if (matches && hours.isNotEmpty()) return "Today: $hours"

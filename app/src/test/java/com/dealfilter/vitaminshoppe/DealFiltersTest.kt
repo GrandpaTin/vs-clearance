@@ -191,6 +191,12 @@ class DealFiltersTest {
         assertEquals("Today: 9:30 AM – 8:30 PM", on(Calendar.WEDNESDAY))
         assertEquals("Today: 9 AM – 8 PM", on(Calendar.SATURDAY))
         assertNull(todaysHours(emptyList()))
+        // A range that wraps past Saturday
+        val weekend = listOf("Monday - Friday: 9 AM – 9 PM", "Saturday - Sunday: 10 AM – 6 PM")
+        fun onW(day: Int) = todaysHours(weekend, Calendar.getInstance().apply { set(Calendar.DAY_OF_WEEK, day) })
+        assertEquals("Today: 10 AM – 6 PM", onW(Calendar.SUNDAY))
+        assertEquals("Today: 10 AM – 6 PM", onW(Calendar.SATURDAY))
+        assertEquals("Today: 9 AM – 9 PM", onW(Calendar.TUESDAY))
     }
 
     @Test

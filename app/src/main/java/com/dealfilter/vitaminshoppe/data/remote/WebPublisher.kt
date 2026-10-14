@@ -207,7 +207,7 @@ class WebPublisher(
         val cur = _state.value
         if (cur.gitHubRepo != s.gitHubRepo || cur.gitHubToken != s.gitHubToken || cur.serverUrl != s.serverUrl || cur.serverToken != s.serverToken) {
             _state.update { it.copy(isPublishing = false) }
-            return@withLock null
+            return@withLock SUPERSEDED
         }
         val ok = outcome.error == null
         lastPublishedSignature = if (ok && !outcome.retryLater) signature else null
@@ -348,6 +348,9 @@ class WebPublisher(
         private const val K_SRV_URL = "srv_url"
         private const val K_SRV_TOKEN = "srv_token"
         private const val K_LAST = "last"
+
+        /** [publish] result when new settings were saved mid-publish; the new ones are published separately. */
+        const val SUPERSEDED = "Settings changed — publishing with the new ones."
         private const val K_PENDING = "pending"
         private const val K_ERROR = "error"
         private const val K_PENDING_REASON = "pending_reason"
