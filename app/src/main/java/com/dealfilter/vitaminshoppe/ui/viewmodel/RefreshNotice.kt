@@ -14,9 +14,11 @@ data class RefreshNotice(val kind: Kind, val title: String, val detail: String, 
 fun refreshNotice(s: DealUiState, now: Long): RefreshNotice? {
     if (s.status != LoadStatus.IDLE || !s.hasData) return null
     val updated = s.lastUpdatedMillis
-    val saved = if (updated == null) "Showing saved deals" else "Showing deals saved ${ago(updated, now)}"
+    val saved = if (updated == null || now - updated < -60_000) "Showing saved deals" else "Showing deals saved ${ago(updated, now)}"
     // The header already says how recent the list is; the banner only repeats it once it matters.
-    val recent = updated != null && now - updated < STALE_AFTER_MS
+    // A time in the future (clock was ahead when saved) is an unknown age: treat it as old.
+    val future = updated != null && now - updated < -60_000
+    val recent = updated != null && !future && now - updated < STALE_AFTER_MS
     return when {
         s.needsVerification -> RefreshNotice(
             RefreshNotice.Kind.VERIFY, "Vitamin Shoppe wants a quick check before it shows new prices", saved, "Check now"
@@ -27,7 +29,7 @@ fun refreshNotice(s: DealUiState, now: Long): RefreshNotice? {
         s.loadError != null -> RefreshNotice(
             RefreshNotice.Kind.FAILED, "Couldn't refresh", if (recent) "${s.loadError.trimEnd('.')}." else "${s.loadError.trimEnd('.')}. $saved.", "Retry"
         )
-        updated != null && now - updated >= STALE_AFTER_MS -> RefreshNotice(
+        updated != null && (future || now - updated >= STALE_AFTER_MS) -> RefreshNotice(
             RefreshNotice.Kind.STALE, "These prices may be out of date", saved, "Refresh"
         )
         else -> null

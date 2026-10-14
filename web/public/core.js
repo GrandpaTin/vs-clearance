@@ -19,7 +19,7 @@ const pos = (v) => (typeof v === 'number' && v > 0 ? v : null);
 /** A shared row the page can show: an id, a link and a real price. */
 export function isUsableItem(o) {
   return !!o && typeof o === 'object' && (typeof o.id === 'string' || typeof o.id === 'number') && String(o.id) !== '' &&
-    typeof o.url === 'string' && /^https:\/\//i.test(o.url) && Number.isFinite(Number(o.site)) && Number(o.site) > 0;
+    typeof o.url === 'string' && /^https?:\/\//i.test(o.url) && Number.isFinite(Number(o.site)) && Number(o.site) > 0;
 }
 
 // Text fields from shared JSON: a string (or number) or nothing — never an object or array.
@@ -34,8 +34,8 @@ export function normalizeItem(o, stock) {
     jda,
     brand: txt(o.brand) || '',
     title: txt(o.title) || String(o.id),
-    url: o.url,
-    img: typeof o.img === 'string' && /^https:\/\//i.test(o.img) ? o.img : null,
+    url: o.url.replace(/^http:\/\//i, 'https://'),
+    img: typeof o.img === 'string' && /^https?:\/\//i.test(o.img) ? o.img.replace(/^http:\/\//i, 'https://') : null,
     list: Math.max(Number(o.list) || 0, Number(o.site)),
     site: Number(o.site),
     adp: pos(o.adp),
@@ -320,8 +320,10 @@ export function prune(ch, current) {
 
 export function aiPrompt(deals, total, store, mode) {
   const shown = deals.slice(0, AI_MAX_ITEMS);
+  // A store without online pickup: everything there is walk-in only.
+  const walkInStore = !!store && store.pickup === false;
   const where = mode === 'pickup' && store
-    ? `on the shelf at ${/vitamin shoppe/i.test(store.name) ? store.name : 'The Vitamin Shoppe, ' + store.name} (${storeAddress(store)})${shown.some((d) => !d.pickup) ? ' — some walk-in only (no online pickup)' : ', all available for store pickup'}`
+    ? `on the shelf at ${/vitamin shoppe/i.test(store.name) ? store.name : 'The Vitamin Shoppe, ' + store.name} (${storeAddress(store)})${walkInStore ? ' — walk-in only (this store has no online pickup)' : shown.some((d) => !d.pickup) ? ' — some walk-in only (no online pickup)' : ', all available for store pickup'}`
     : store ? `from The Vitamin Shoppe online (stock also checked at ${store.name})` : 'from The Vitamin Shoppe online';
   const scope = total > shown.length
     ? `These are the top ${shown.length} of ${total} deals matching my filters.`
@@ -338,7 +340,7 @@ export function aiPrompt(deals, total, store, mode) {
     const details = [d.form, d.servings && `${d.servings} servings`, d.servingSize && `serving = ${d.servingSize}`, perServingLabel(d)]
       .filter(Boolean).join(' · ') || 'n/a';
     const avail = [d.oos ? 'out of stock online' : 'available online'];
-    if (store && d.qty != null) avail.push(d.qty > 0 ? `${d.qty} at ${store.name}${d.pickup ? '' : ' (walk-in only)'}` : `none at ${store.name}`);
+    if (store && d.qty != null) avail.push(d.qty > 0 ? `${d.qty} at ${store.name}${d.pickup && !walkInStore ? '' : ' (walk-in only)'}` : `none at ${store.name}`);
     const adp = autoDeliveryDeal(d);
     return `${i + 1}. **${d.brand}** — ${d.title}\n   - Price: ${price}\n` +
       (adp ? `   - Auto Delivery price: ${money(adp)}\n` : '') +
@@ -369,8 +371,10 @@ ${lines}`;
 }
 
 export function storeAddress(s) {
-  const street = [s.a1 ?? s.address1, s.a2 ?? s.address2].filter(Boolean).join(', ');
-  return [street, `${s.city}, ${s.state} ${s.zip}`.trim()].filter(Boolean).join(', ');
+  const part = (v) => (typeof v === 'string' || typeof v === 'number' ? String(v).trim() : '');
+  const street = [part(s.a1 ?? s.address1), part(s.a2 ?? s.address2)].filter(Boolean).join(', ');
+  const place = [part(s.city), [part(s.state), part(s.zip)].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+  return [street, place].filter(Boolean).join(', ');
 }
 
 /**

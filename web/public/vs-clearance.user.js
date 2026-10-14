@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         VS Clearance — Vitamin Shoppe deal finder
 // @namespace    vs-clearance
-// @version      3.1.1.53
+// @version      3.1.1.54
 // @description  Every Vitamin Shoppe clearance deal with real cart prices, your store's shelf stock, filters, and an AI review prompt.
 // @match        https://www.vitaminshoppe.com/*
 // @run-at       document-idle
@@ -16,7 +16,7 @@
 (() => {
 'use strict';
 const __VSX_CSS__ = ":host {\n  --navy: #012169; --navy-dark: #001540; --sky: #15BEF0;\n  --bg: #F8FAFC; --surface: #FFFFFF; --surface-2: #F1F5F9; --text: #0F172A; --muted: #64748B;\n  --outline: #CBD5E1; --hairline: #E2E8F0; --price: #047857; --em-bg: #D1FAE5; --em-fg: #065F46;\n  --sky-bg: #E0F2FE; --sky-fg: #0369A1; --amber-bg: #FEF3C7; --amber-fg: #92400E; --red-bg: #FEE2E2; --red-fg: #991B1B;\n  --header: var(--navy); --search: var(--navy-dark); --link: var(--navy);\n  color-scheme: light dark;\n}\n@media (prefers-color-scheme: dark) {\n  :host {\n    --bg: #0B1120; --surface: #111827; --surface-2: #1E293B; --text: #F8FAFC; --muted: #94A3B8;\n    --outline: #334155; --hairline: #1F2A3C; --price: #34D399; --em-bg: #064E3B; --em-fg: #A7F3D0;\n    --sky-bg: #0C4A6E; --sky-fg: #BAE6FD; --amber-bg: #451A03; --amber-fg: #FCD34D; --red-bg: #7F1D1D; --red-fg: #FECACA;\n    --header: var(--navy-dark); --search: #1E293B; --link: var(--sky);\n  }\n}\n* { box-sizing: border-box; }\n[hidden] { display: none !important; }\nbutton { font: inherit; color: inherit; cursor: pointer; }\n:focus-visible { outline: 3px solid var(--sky); outline-offset: 2px; }\n.vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }\n.muted { color: var(--muted); margin: 0; }\n.err { color: var(--red-fg); margin: 0; }\n\n.launcher {\n  position: fixed; left: 16px; bottom: calc(16px + env(safe-area-inset-bottom)); z-index: 2147483646;\n  display: flex; align-items: center; gap: 6px; border: 0; border-radius: 999px; padding: 0 20px; min-height: 52px;\n  background: linear-gradient(135deg, #34D399, #047857); color: #fff; font: 700 17px/1 system-ui, -apple-system, sans-serif;\n  box-shadow: 0 8px 24px rgba(0,0,0,.3);\n}\n\n.app {\n  position: fixed; inset: 0; z-index: 2147483647; display: flex; flex-direction: column;\n  background: var(--bg); color: var(--text); font: 16px/1.4 system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif;\n  -webkit-text-size-adjust: 100%;\n}\n.top { background: var(--header); color: #fff; padding: calc(env(safe-area-inset-top) + 10px) 16px 12px; flex: none; }\n.top-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; max-width: 900px; margin: 0 auto; }\n.top-actions { display: flex; }\nh1 { font-size: 1.35rem; margin: 0; }\n.subtitle { margin: 2px 0 0; font-size: .85rem; opacity: .85; }\n.icon-btn { background: transparent; border: 0; border-radius: 50%; width: 44px; height: 44px; display: grid; place-items: center; font-size: 20px; }\n.icon-btn.on-dark { color: #fff; }\n.icon-btn.spin { animation: spin 1s linear infinite; }\n@keyframes spin { to { transform: rotate(360deg); } }\n.search { display: flex; align-items: center; gap: 8px; background: var(--search); border-radius: 12px; padding: 0 12px; margin: 10px auto 0; max-width: 900px; min-height: 50px; }\n.search input { flex: 1; min-width: 0; background: transparent; border: 0; color: #fff; font-size: 16px; padding: 12px 0; }\n.search input::placeholder { color: rgba(255,255,255,.7); }\n.search input:focus { outline: none; }\n\n.scroll { flex: 1; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding-bottom: calc(32px + env(safe-area-inset-bottom)); }\n.scroll > * { max-width: 900px; margin-left: auto; margin-right: auto; }\n.banner { display: flex; align-items: center; gap: 10px; margin: 12px; border-radius: 12px; padding: 8px 8px 8px 14px; }\n.banner span { flex: 1; }\n.banner.warn { background: var(--amber-bg); color: var(--amber-fg); }\n.banner.bad { background: var(--red-bg); color: var(--red-fg); }\n.banner.info { background: var(--sky-bg); color: var(--sky-fg); }\n.text-btn { background: none; border: 0; font-weight: 700; padding: 10px 12px; min-height: 44px; border-radius: 8px; }\n\n.controls { padding: 12px 12px 4px; }\n.segmented { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--outline); border-radius: 999px; overflow: hidden; }\n.segmented button { background: transparent; border: 0; min-height: 44px; font-weight: 600; }\n.segmented button + button { border-left: 1px solid var(--outline); }\n.segmented button[aria-checked=\"true\"] { background: var(--sky-bg); color: var(--sky-fg); }\n.segmented button[aria-checked=\"true\"]::before { content: \"✓ \"; content: \"✓ \" / \"\"; }\n.store-row { display: flex; align-items: center; gap: 10px; width: 100%; margin-top: 8px; padding: 8px 12px; min-height: 52px;\n  background: var(--surface-2); border: 0; border-radius: 12px; text-align: left; }\n.store-text { flex: 1; display: flex; flex-direction: column; }\n.store-text small { color: var(--muted); }\n.chips { display: flex; gap: 8px; overflow-x: auto; padding: 8px 2px 0; scrollbar-width: none; }\n.chips::-webkit-scrollbar { display: none; }\n.chip { flex: none; border: 1px solid var(--outline); background: transparent; border-radius: 8px; min-height: 36px; padding: 6px 14px; font-weight: 600; color: var(--muted); white-space: nowrap; }\n.chip[aria-pressed=\"true\"] { background: var(--sky-bg); color: var(--sky-fg); border-color: transparent; }\n.chip[aria-pressed=\"true\"]::before { content: \"✓ \"; content: \"✓ \" / \"\"; }\n.chip.clear::after { content: \" ✕\"; content: \" ✕\" / \"\"; }\n\n.summary { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 8px; background: var(--bg); padding: 10px 12px 8px 16px; border-bottom: 1px solid var(--hairline); }\n.count { flex: 1 0 auto; font-weight: 700; white-space: nowrap; }\n.tonal-btn { display: inline-flex; align-items: center; gap: 6px; background: var(--sky-bg); color: var(--sky-fg); border: 0; border-radius: 999px; min-height: 40px; padding: 0 12px; font-weight: 700; white-space: nowrap; }\n.tonal-btn.wide { justify-content: center; }\n.sort { display: inline-flex; align-items: center; gap: 2px; color: var(--link); }\n.sort option { color: var(--text); background: var(--surface); }\n.sort select { background: transparent; color: var(--link); border: 0; font: inherit; font-weight: 700; min-height: 40px; max-width: 36vw; text-overflow: ellipsis; }\n\n.list { list-style: none; margin: 0 auto; padding: 8px 12px; display: grid; gap: 8px; }\n@media (min-width: 760px) { .list { grid-template-columns: 1fr 1fr; } }\n.card { background: var(--surface); border: 1px solid var(--hairline); border-radius: 16px; display: grid; grid-template-columns: 88px 1fr; gap: 12px; padding: 12px 6px 6px 12px; }\n.thumb { width: 88px; height: 88px; border-radius: 12px; border: 1px solid var(--hairline); background: #fff; display: grid; place-items: center; overflow: hidden; text-decoration: none; font-size: 32px; }\n.thumb.none { background: var(--surface-2); }\n.thumb img { width: 82px; height: 82px; object-fit: contain; padding: 4px; }\n.body { min-width: 0; display: flex; flex-direction: column; gap: 4px; }\n.brandline { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }\n.brand { font-size: .75rem; letter-spacing: .06em; font-weight: 800; color: var(--link); text-transform: uppercase; }\n.title { font-weight: 600; color: var(--text); text-decoration: none; padding-right: 8px;\n  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }\n.prices { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }\n.price { font-size: 1.35rem; font-weight: 800; color: var(--price); }\n.was { color: var(--muted); text-decoration: line-through; }\n.tag { font-size: .75rem; font-weight: 800; border-radius: 6px; padding: 2px 6px; }\n.tag.off, .tag.drop { background: var(--em-bg); color: var(--em-fg); }\n.tag.new { background: var(--sky-bg); color: var(--sky-fg); }\n.note { font-size: .85rem; color: var(--muted); }\n.pills { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }\n.pill { background: var(--surface-2); color: var(--muted); font-size: .8rem; border-radius: 6px; padding: 2px 6px; }\n.rating { font-size: .85rem; color: var(--muted); }\n.foot { display: flex; align-items: center; min-height: 44px; }\n.stock { flex: 1; display: flex; align-items: center; gap: 6px; font-size: .9rem; font-weight: 500; }\n.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--outline); flex: none; }\n.dot.good { background: var(--em-fg); }\n.dot.bad { background: var(--red-fg); }\n.foot .icon-btn { color: var(--muted); }\n\n.status { text-align: center; padding: 40px 28px; display: grid; justify-items: center; gap: 8px; }\n.badge { width: 88px; height: 88px; border-radius: 50%; display: grid; place-items: center; background: var(--sky-bg); font-size: 40px; }\n.status h2 { margin: 8px 0 0; font-size: 1.15rem; }\n.status p { margin: 0; color: var(--muted); max-width: 460px; }\n.actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 8px; }\n.primary-btn { background: var(--navy); color: #fff; border: 0; border-radius: 999px; min-height: 44px; padding: 0 20px; font-weight: 700; }\n@media (prefers-color-scheme: dark) { .primary-btn { background: var(--sky); color: var(--navy-dark); } }\na.primary-btn { display: inline-flex; align-items: center; text-decoration: none; }\n.outline-btn { background: transparent; border: 1px solid var(--outline); border-radius: 999px; min-height: 44px; padding: 0 18px; font-weight: 700; }\n.skeleton { height: 140px; border-radius: 16px; background: linear-gradient(90deg, var(--surface-2), var(--surface), var(--surface-2)); background-size: 200% 100%; animation: shimmer 1.4s infinite; }\n@keyframes shimmer { to { background-position: -200% 0; } }\n@media (prefers-reduced-motion: reduce) { .skeleton, .icon-btn.spin { animation: none; } }\n\n.sheet-wrap { position: absolute; inset: 0; background: rgba(0,0,0,.5); display: flex; align-items: flex-end; justify-content: center; z-index: 5; }\n.sheet { background: var(--surface); color: var(--text); width: 100%; max-width: 720px; max-height: 88%; overflow-y: auto; overscroll-behavior: contain;\n  border-radius: 20px 20px 0 0; padding: 20px 16px calc(16px + env(safe-area-inset-bottom)); display: grid; gap: 12px; }\n@media (min-width: 760px) { .sheet-wrap { align-items: center; } .sheet { border-radius: 20px; } }\n.sheet h2 { margin: 0; font-size: 1.25rem; }\n.store-form { display: flex; gap: 8px; }\n.store-form input { flex: 1; min-width: 0; font-size: 16px; padding: 12px; border: 1px solid var(--outline); border-radius: 12px; background: var(--surface); color: var(--text); }\n.stores { display: grid; gap: 8px; }\n.store { display: flex; gap: 8px; text-align: left; background: var(--surface-2); border: 2px solid transparent; border-radius: 12px; padding: 12px; }\n.store.selected { background: var(--sky-bg); border-color: var(--sky-fg); }\n.store[aria-disabled=\"true\"] { opacity: .7; }\n.store-main { flex: 1; display: flex; flex-direction: column; }\n.store-main span, .store-main small { color: var(--muted); }\n.store-main small.err { color: var(--red-fg); }\n.dist { color: var(--link); font-weight: 700; white-space: nowrap; }\n.scope { background: var(--sky-bg); color: var(--sky-fg); border-radius: 12px; padding: 12px; }\n.scope b { display: block; }\n.sheet-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }\n.sheet-actions button { min-height: 48px; }\ndetails summary { cursor: pointer; font-weight: 700; min-height: 44px; display: flex; align-items: center; }\npre { white-space: pre-wrap; background: var(--surface-2); border-radius: 12px; padding: 12px; max-height: 300px; overflow: auto; font-size: 12px; margin: 0; }\n.close { justify-self: end; }\n.toast { position: absolute; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom)); transform: translateX(-50%); background: #1E293B; color: #fff; padding: 12px 18px; border-radius: 12px; max-width: calc(100% - 32px); z-index: 6; }\n\n.share-line { display: flex; align-items: center; gap: 4px; margin: 0 12px 12px; padding: 4px 4px 4px 14px; border-radius: 12px; background: var(--surface-2); color: var(--muted); font-size: .9rem; }\n.share-line span { flex: 1; }\n.share-line a { color: var(--link); text-decoration: none; }\n\n.foot-note { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; column-gap: 14px; color: var(--muted); font-size: .8rem; padding: 4px 16px 24px; }\n.link-btn { background: none; border: 0; color: inherit; text-decoration: underline; font: inherit; padding: 8px 4px; min-height: 40px; cursor: pointer; }\n.app:focus { outline: none; }\n";
-const __VSX_VERSION__ = "3.1.1.53";
+const __VSX_VERSION__ = "3.1.1.54";
 const __VSX_HOME__ = "https://grandpatin.github.io/vs-clearance/";
 // Pure deal logic shared by the web app and its tests. Mirrors the Android app's
 // DealItem / DealFilters / AiPrompt so both show identical prices and orderings.
@@ -39,7 +39,7 @@ const pos = (v) => (typeof v === 'number' && v > 0 ? v : null);
 /** A shared row the page can show: an id, a link and a real price. */
 function isUsableItem(o) {
   return !!o && typeof o === 'object' && (typeof o.id === 'string' || typeof o.id === 'number') && String(o.id) !== '' &&
-    typeof o.url === 'string' && /^https:\/\//i.test(o.url) && Number.isFinite(Number(o.site)) && Number(o.site) > 0;
+    typeof o.url === 'string' && /^https?:\/\//i.test(o.url) && Number.isFinite(Number(o.site)) && Number(o.site) > 0;
 }
 
 // Text fields from shared JSON: a string (or number) or nothing — never an object or array.
@@ -54,8 +54,8 @@ function normalizeItem(o, stock) {
     jda,
     brand: txt(o.brand) || '',
     title: txt(o.title) || String(o.id),
-    url: o.url,
-    img: typeof o.img === 'string' && /^https:\/\//i.test(o.img) ? o.img : null,
+    url: o.url.replace(/^http:\/\//i, 'https://'),
+    img: typeof o.img === 'string' && /^https?:\/\//i.test(o.img) ? o.img.replace(/^http:\/\//i, 'https://') : null,
     list: Math.max(Number(o.list) || 0, Number(o.site)),
     site: Number(o.site),
     adp: pos(o.adp),
@@ -340,8 +340,10 @@ function prune(ch, current) {
 
 function aiPrompt(deals, total, store, mode) {
   const shown = deals.slice(0, AI_MAX_ITEMS);
+  // A store without online pickup: everything there is walk-in only.
+  const walkInStore = !!store && store.pickup === false;
   const where = mode === 'pickup' && store
-    ? `on the shelf at ${/vitamin shoppe/i.test(store.name) ? store.name : 'The Vitamin Shoppe, ' + store.name} (${storeAddress(store)})${shown.some((d) => !d.pickup) ? ' — some walk-in only (no online pickup)' : ', all available for store pickup'}`
+    ? `on the shelf at ${/vitamin shoppe/i.test(store.name) ? store.name : 'The Vitamin Shoppe, ' + store.name} (${storeAddress(store)})${walkInStore ? ' — walk-in only (this store has no online pickup)' : shown.some((d) => !d.pickup) ? ' — some walk-in only (no online pickup)' : ', all available for store pickup'}`
     : store ? `from The Vitamin Shoppe online (stock also checked at ${store.name})` : 'from The Vitamin Shoppe online';
   const scope = total > shown.length
     ? `These are the top ${shown.length} of ${total} deals matching my filters.`
@@ -358,7 +360,7 @@ function aiPrompt(deals, total, store, mode) {
     const details = [d.form, d.servings && `${d.servings} servings`, d.servingSize && `serving = ${d.servingSize}`, perServingLabel(d)]
       .filter(Boolean).join(' · ') || 'n/a';
     const avail = [d.oos ? 'out of stock online' : 'available online'];
-    if (store && d.qty != null) avail.push(d.qty > 0 ? `${d.qty} at ${store.name}${d.pickup ? '' : ' (walk-in only)'}` : `none at ${store.name}`);
+    if (store && d.qty != null) avail.push(d.qty > 0 ? `${d.qty} at ${store.name}${d.pickup && !walkInStore ? '' : ' (walk-in only)'}` : `none at ${store.name}`);
     const adp = autoDeliveryDeal(d);
     return `${i + 1}. **${d.brand}** — ${d.title}\n   - Price: ${price}\n` +
       (adp ? `   - Auto Delivery price: ${money(adp)}\n` : '') +
@@ -389,8 +391,10 @@ ${lines}`;
 }
 
 function storeAddress(s) {
-  const street = [s.a1 ?? s.address1, s.a2 ?? s.address2].filter(Boolean).join(', ');
-  return [street, `${s.city}, ${s.state} ${s.zip}`.trim()].filter(Boolean).join(', ');
+  const part = (v) => (typeof v === 'string' || typeof v === 'number' ? String(v).trim() : '');
+  const street = [part(s.a1 ?? s.address1), part(s.a2 ?? s.address2)].filter(Boolean).join(', ');
+  const place = [part(s.city), [part(s.state), part(s.zip)].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+  return [street, place].filter(Boolean).join(', ');
 }
 
 /**
@@ -663,7 +667,9 @@ function todaysHours(lines, date = new Date()) {
     const store = state.store;
     if (!store || !state.raw.length) return;
     const run = ++stockRun;
-    const keep = onlyMissing && hasStock() ? state.stock : null;
+    let keep = onlyMissing && hasStock() ? state.stock : null;
+    // Marked partial but every SKU has a value (a full re-check kept old counts, then failed): check all.
+    if (keep && keep.partial && state.raw.every((o) => !o.jda || o.jda in keep.map)) keep = null;
     // A full re-check starts from the old counts so batches it never reaches keep their last value.
     const prev = !keep && hasStock() ? state.stock : null;
     let skus = [...new Set(state.raw.map((o) => o.jda).filter(Boolean))];
@@ -700,10 +706,10 @@ function todaysHours(lines, date = new Date()) {
         const connection = /offline|couldn't reach/i.test(e.message);
         // the title already says "Quick check needed"; the body says what for and what to do
         state.stockError = state.stockBlocked
-          ? `Vitamin Shoppe wants to confirm a person is browsing before showing stock at ${store.name}. Tap Reload page, complete any check, and Deals reopens.`
+          ? `Vitamin Shoppe wants to confirm a person is browsing before showing stock at ${store.name}. Reload the page, complete any check, and Deals reopens.`
           : (reached ? `Couldn't check ${missing} of ${total} items at ${store.name}. ` : `Couldn't re-check shelf stock at ${store.name}. `) +
             `${e.message.replace(/\.?$/, '.')}`;
-        state.stockAdvice = connection ? 'Check your connection and try again.' : 'Tap Retry, or it will try again later.';
+        state.stockAdvice = connection ? 'Check your connection and try again.' : 'Retry, or it will try again later.';
       }
     } finally {
       if (run === stockRun) { state.stockLoading = false; render(); }
@@ -775,7 +781,9 @@ function todaysHours(lines, date = new Date()) {
     // Say how many were found and put focus on the first, for keyboard and screen-reader users.
     if (state.sheet === 'stores') {
       if (!storeSearch.message && storeSearch.results.length) {
-        toast(`${storeSearch.results.length} store${storeSearch.results.length === 1 ? '' : 's'} found`);
+        const found = `${storeSearch.results.length} store${storeSearch.results.length === 1 ? '' : 's'} found`;
+        ref('sheetLive').textContent = found; // inside the dialog, where VoiceOver listens
+        toast(found);
         const first = ref('sheet').querySelector('.store');
         if (first) first.focus({ preventScroll: true });
       } else {
@@ -816,7 +824,7 @@ function todaysHours(lines, date = new Date()) {
         <div class="share-line" data-ref="shareLine" hidden></div>
         <p class="foot-note" data-ref="footNote"></p>
       </div>
-      <div class="sheet-wrap" data-ref="sheetWrap" hidden><div class="sheet" data-ref="sheet" role="dialog" aria-modal="true" aria-labelledby="vsx-sheet-title"></div></div>
+      <div class="sheet-wrap" data-ref="sheetWrap" hidden><div class="sheet" data-ref="sheet" role="dialog" aria-modal="true" aria-labelledby="vsx-sheet-title"><div data-ref="sheetBody"></div><span class="vh" data-ref="sheetLive" role="status" aria-live="polite"></span></div></div>
       <div class="toast" data-ref="toast" role="status" aria-live="polite" hidden></div>
     </div>`;
   const ref = (n) => root.querySelector(`[data-ref="${n}"]`);
@@ -866,6 +874,7 @@ function todaysHours(lines, date = new Date()) {
       ref('subtitle').textContent = `Updated ${relativeTime(state.savedAt)}` + (n ? ` · ${n} new or cheaper` : '');
     }
     keepFocus(renderBanner);
+    refreshAges();
     keepFocus(renderShareLine);
   }, 60_000);
 
@@ -898,7 +907,15 @@ function todaysHours(lines, date = new Date()) {
   }
 
   /** An age inside a live region: shown, but not re-read every minute as it ticks ("earlier" is spoken). */
-  const quietAge = (ms) => `<span aria-hidden="true">${relativeTime(ms)}</span><span class="vh">earlier</span>`;
+  const quietAge = (ms) => `<span class="age" aria-hidden="true" data-ms="${ms}">${relativeTime(ms)}</span><span class="vh">earlier</span>`;
+  /** Updates every ticking age in place (aria-hidden, so nothing is re-announced). */
+  function refreshAges() {
+    for (const el of root.querySelectorAll('.age[data-ms]')) {
+      const t = relativeTime(Number(el.dataset.ms));
+      if (el.textContent !== t) el.textContent = t;
+    }
+  }
+  const ageless = (html) => html.replace(/(<span class="age"[^>]*>)[^<]*/g, '$1').replace(/data-ms="\d+"/g, '');
   const savedPhrase = () => {
     const ago = relativeTime(state.savedAt);
     return ago === 'just now' ? 'keeping the list on screen' : `showing the list saved ${quietAge(state.savedAt)}`;
@@ -965,7 +982,7 @@ function todaysHours(lines, date = new Date()) {
       setList(list, state.loading ? '<li class="skeleton"></li>'.repeat(4) : '');
       status.hidden = state.loading;
       status.innerHTML = state.loading ? '' : statusHtml(state.blocked ? '🛡️' : '⚠️',
-        state.blocked ? 'Quick check needed' : "Couldn't load deals", state.blocked ? 'Vitamin Shoppe wants to confirm a person is browsing. Tap Reload page, complete any check, and Deals reopens.' : esc(state.error || "Vitamin Shoppe didn't send any deals.") + (state.siteChanged ? '' : ' It will try again automatically, or tap Try again.'),
+        state.blocked ? 'Quick check needed' : "Couldn't load deals", state.blocked ? 'Vitamin Shoppe wants to confirm a person is browsing. Reload the page, complete any check, and Deals reopens.' : esc(state.error || "Vitamin Shoppe didn't send any deals.") + (state.siteChanged ? '' : ' It will try again automatically, or try again now.'),
         state.siteChanged ? [['Try again', 'refresh', false]] : [[state.blocked ? 'Reload page' : 'Try again', state.blocked ? 'reload-page' : 'refresh', true]]) +
         (state.siteChanged ? `<div class="actions"><a class="primary-btn" href="${esc(__VSX_HOME__)}vs-clearance.user.js" target="_blank" rel="noopener">Update VS Clearance</a></div>` : '');
       return;
@@ -1027,7 +1044,7 @@ function todaysHours(lines, date = new Date()) {
       // 7. shelf stock's age said once, not on every card
       html = `<div class="banner info"><span>Shelf stock at ${esc(state.store.name)} was checked ${quietAge(state.stock.at)}.</span><button class="text-btn" data-act="retry-stock">Check now</button></div>`;
     } else html = '';
-    if (html === lastBannerHtml) return;
+    if (ageless(html) === ageless(lastBannerHtml || '')) { refreshAges(); return; }
     lastBannerHtml = html;
     ref('banner').innerHTML = html;
   }
@@ -1046,7 +1063,7 @@ function todaysHours(lines, date = new Date()) {
     setHtml(ref('controls'), `
       <div class="segmented" role="radiogroup" aria-label="Fulfillment">
         <button role="radio" data-act="mode" data-v="ship" aria-checked="${state.mode === 'ship'}" tabindex="${state.mode === 'ship' ? 0 : -1}">Ship</button>
-        <button role="radio" data-act="mode" data-v="pickup" aria-checked="${state.mode === 'pickup'}" tabindex="${state.mode === 'pickup' ? 0 : -1}">Pick up</button>
+        <button role="radio" data-act="mode" data-v="pickup" aria-checked="${state.mode === 'pickup'}" tabindex="${state.mode === 'pickup' ? 0 : -1}">${state.store?.pickup === false ? 'In store' : 'Pick up'}</button>
       </div>
       <button class="store-row" data-act="stores">
         <span aria-hidden="true">📍</span>
@@ -1064,7 +1081,7 @@ function todaysHours(lines, date = new Date()) {
     let stock, dot = '';
     if (state.store && state.stockLoading && d.qty == null) stock = 'Checking shelf…';
     else if (hasStock() && d.qty > 0) {
-      stock = `${d.qty} on the shelf` + (d.pickup === false ? ' · walk-in only' : '') +
+      stock = `${d.qty} on the shelf` + (d.pickup === false || state.store?.pickup === false ? ' · walk-in only' : '') +
         '';
       dot = 'good';
     }
@@ -1137,8 +1154,13 @@ function todaysHours(lines, date = new Date()) {
   }
 
   let promptText = '';
+  // The sheet's content through setHtml (no rebuild, so no lost focus, when nothing changed).
+  const sheetBody = {
+    set innerHTML(html) { setHtml(ref('sheetBody'), html); },
+    querySelector: (sel) => ref('sheetBody').querySelector(sel)
+  };
   function renderSheet() {
-    const sheet = ref('sheet');
+    const sheet = sheetBody;
     const oldInput = sheet.querySelector('form input');
     const typed = oldInput ? oldInput.value : null, typing = oldInput && root.activeElement === oldInput;
     if (state.sheet === 'stores') {
@@ -1192,7 +1214,11 @@ function todaysHours(lines, date = new Date()) {
         await loadDeals();
         if (!state.error && state.items.length) toast('Deals updated');
         // Still nothing: stay on Try again so another Enter tries again.
-        else if (fromPanel) { const again = ref('status').querySelector('[data-act="refresh"]'); if (again) again.focus({ preventScroll: true }); }
+        else if (fromPanel) {
+          ref('live').textContent = `Still couldn't load deals. ${state.error || ''}`.trim();
+          const again = ref('status').querySelector('[data-act="refresh"]');
+          if (again) again.focus({ preventScroll: true });
+        }
         return;
       }
       case 'retry-stock':
@@ -1347,6 +1373,7 @@ function todaysHours(lines, date = new Date()) {
       history.replaceState(null, '', location.pathname + location.search);
       setTimeout(() => toast('Sharing turned on — your list will appear on your link'), 400);
     } catch {
+      history.replaceState(null, '', location.pathname + location.search); // never leave a token in the address bar
       setTimeout(() => toast('That sharing link is invalid.'), 400);
     }
     return true;
@@ -1421,13 +1448,27 @@ function todaysHours(lines, date = new Date()) {
     attach(paired);
   }
   mount();
-  window.addEventListener('hashchange', () => { if (location.hash === '#vsdeals' && !state.open) openApp(); });
+  window.addEventListener('hashchange', () => {
+    if (/^#vsdeals-share=/.test(location.hash)) {
+      // Same tab, already on the site: the script doesn't re-run, so pair here.
+      const paired = takePairing() && !!state.share;
+      openApp();
+      if (paired && state.raw.length && !listIsOld()) publish();
+      return;
+    }
+    if (location.hash === '#vsdeals' && !state.open) openApp();
+  });
+  let lastOpenedCard = null;
+  ref('list').addEventListener('click', (e) => {
+    const a = e.target.closest && e.target.closest('[data-card]');
+    if (a) lastOpenedCard = a.dataset.card;
+  });
   window.addEventListener('pageshow', (e) => {
     if (e.persisted) try { sessionStorage.removeItem('vsx.view'); } catch { /* private mode */ }
   });
   window.addEventListener('pagehide', () => {
     if (!state.open) return;
-    const card = root.activeElement && root.activeElement.dataset ? root.activeElement.dataset.card : null;
+    const card = lastOpenedCard || (root.activeElement && root.activeElement.dataset ? root.activeElement.dataset.card : null);
     try { sessionStorage.setItem('vsx.view', JSON.stringify({ q: state.query, top: ref('scroll').scrollTop, card, at: Date.now() })); } catch { /* private mode */ }
   });
 })();

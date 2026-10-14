@@ -198,7 +198,6 @@ fun DealScreenContent(state: DealUiState, viewModel: DealActions, modifier: Modi
     val dark = DealTheme.badges.isDark
     val largeFont = LocalDensity.current.fontScale >= 1.3f
     val headerColor = if (dark) NavyDark else NavyPrimary
-    val now = rememberNowMillis()
 
     val scope = rememberCoroutineScope()
     LaunchedEffect(state.message) {
@@ -259,7 +258,7 @@ fun DealScreenContent(state: DealUiState, viewModel: DealActions, modifier: Modi
                                 color = Color.White,
                                 modifier = Modifier.semantics { heading() }
                             )
-                            HeaderSubtitle(state, now, compact = largeFont)
+                            HeaderSubtitle(state, compact = largeFont)
                         }
                     },
                     actions = {
@@ -278,7 +277,7 @@ fun DealScreenContent(state: DealUiState, viewModel: DealActions, modifier: Modi
                                 tint = Color.White
                             )
                         }
-                        IconButton(onClick = viewModel::refresh, enabled = state.status == LoadStatus.IDLE) {
+                        IconButton(onClick = viewModel::refresh, enabled = state.status != LoadStatus.LOADING) {
                             if (state.status == LoadStatus.IDLE) {
                                 Icon(Icons.Default.Refresh, contentDescription = "Refresh deals", tint = Color.White)
                             } else {
@@ -323,7 +322,7 @@ fun DealScreenContent(state: DealUiState, viewModel: DealActions, modifier: Modi
             Column(Modifier.fillMaxSize()) {
             // Pinned above the list: inside a LazyColumn a banner appearing at the top is scrolled
             // out of sight (the list stays anchored to the first row), which hid every refresh error.
-            Banners(state, viewModel, now)
+            Banners(state, viewModel)
             LazyColumn(
                 state = listState,
                 contentPadding = PaddingValues(bottom = 96.dp),
@@ -585,7 +584,8 @@ private fun rememberNowMillis(): Long {
 }
 
 @Composable
-private fun HeaderSubtitle(state: DealUiState, now: Long, compact: Boolean) {
+private fun HeaderSubtitle(state: DealUiState, compact: Boolean) {
+    val now = rememberNowMillis()
     // At large font sizes the bar has room for one short line only ("4 min ago").
     val updated = state.lastUpdatedMillis?.let { ago(it, now) }
         ?.let { if (compact) it.replace(" minutes", " min").replace(" minute", " min").replace(" hours", " hr").replace(" hour", " hr") else it }
@@ -671,7 +671,8 @@ private fun AppMenu(viewModel: DealActions) {
 }
 
 @Composable
-private fun Banners(state: DealUiState, viewModel: DealActions, now: Long) {
+private fun Banners(state: DealUiState, viewModel: DealActions) {
+    val now = rememberNowMillis()
     val badges = DealTheme.badges
     Column {
         val release = state.update.available

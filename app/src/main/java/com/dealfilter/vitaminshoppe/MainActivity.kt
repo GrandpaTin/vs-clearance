@@ -19,7 +19,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        if (savedInstanceState == null) viewModel.handlePairingLink(intent?.data)
+        // Recents re-delivers the original link intent: only a fresh launch from the link counts.
+        val fromHistory = (intent?.flags ?: 0) and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0
+        if (savedInstanceState == null && !fromHistory) viewModel.handlePairingLink(intent?.data)
+        consumeLink()
         val debuggable = (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
         if (debuggable && intent?.getBooleanExtra("debug_challenge_layout", false) == true) {
             (application as VitaminShoppeApp).webSession.debugShowChallengeLayout()
@@ -36,6 +39,13 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         viewModel.handlePairingLink(intent.data)
+        setIntent(intent)
+        consumeLink()
+    }
+
+    /** The link has been offered; drop it so a later recreate can't offer it again. */
+    private fun consumeLink() {
+        intent?.let { if (it.data != null) setIntent(Intent(it).setData(null)) }
     }
 
     override fun onStart() {

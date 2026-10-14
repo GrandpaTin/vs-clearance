@@ -279,7 +279,7 @@ open class AppUpdater(
             } finally {
                 conn.disconnect()
             }
-            verifyMatchesInstalledApp(partial, release)?.let { partial.delete(); return it }
+            verifyMatchesInstalledApp(partial, release, exact = true)?.let { partial.delete(); return it }
             if (!partial.renameTo(target)) {
                 target.delete()
                 if (!partial.renameTo(target)) return "Couldn't save the update. Free up some space and try again."

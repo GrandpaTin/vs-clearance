@@ -96,6 +96,9 @@ async function load({ manual = false } = {}) {
     // and "slow" only when the network was slow rather than unreachable.
     const cached = navigator.onLine === false ? 'offline' : via === 'error' ? 'failed' : 'slow';
     if (fromCache && state.snapshot) {
+      // The worker turns a failed check into its saved copy: same grace as a failed fetch (one blip
+      // on flaky mobile data isn't news; two in a row are). Offline shows at once.
+      if (!manual && !wasLoading && cached !== 'offline' && ++quietFailures < 2) { changed = false; return; }
       state.error = cached; changed = false;
       const said = { offline: ['Still offline', 'You’re offline'], slow: ['Connection is still slow', 'Connection is slow'], failed: ['Still couldn’t check for updates', 'Couldn’t check for updates'] }[cached];
       if (manual) toast(before === cached ? said[0] : said[1]);
@@ -145,9 +148,14 @@ function acceptSnapshot(snap) {
   const when = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : typeof v === 'string' ? Date.parse(v) || null : null);
   snap.publishedAt = when(snap.publishedAt);
   snap.savedAt = when(snap.savedAt);
+  // Stock must be a plain { sku: count } object; anything else just means "no shelf stock".
+  if (!snap.stock || typeof snap.stock !== 'object' || Array.isArray(snap.stock)) snap.stock = null;
   const stock = snap.stockStoreId && snap.store && snap.stockStoreId === snap.store.id ? snap.stock : null;
-  // One malformed row (no id, link or price) is skipped rather than taking the whole list down.
-  const items = snap.items.filter(isUsableItem).map((o) => normalizeItem(o, stock));
+  // One malformed row (no id, link or price) is skipped rather than taking the whole list down,
+  // and a repeated id keeps its first row (shares, marks and cards are keyed by id).
+  const ids = new Set();
+  const items = snap.items.filter(isUsableItem).map((o) => normalizeItem(o, stock))
+    .filter((d) => !ids.has(d.id) && ids.add(d.id));
   // "New & price drops" are tracked per viewer: compare with the list this device saw last time.
   const seen = store.get('seen', null);
   const marks = store.get('marks', null);
@@ -242,7 +250,7 @@ function renderHeader() {
   // banner for stale / failed refresh with data on screen
   // Before there's a list, "browse here" and a search box would promise something that isn't there.
   document.querySelector('.search').hidden = (!snap && !state.loading) || (!!snap && !state.items.length);
-  const notice = !!snap && (!!state.error || (state.items.length > 0 && Date.now() - (snap.savedAt || snap.publishedAt) > 36 * 3600e3));
+  const notice = !!snap && (!!state.error || (state.items.length > 0 && oldList()));
   // One banner at a time: a stale or failed-update notice (which links to the app too) wins.
   $('intro').hidden = !introWanted || !snap || !state.items.length || notice ||
     !$('update-banner').hidden;
@@ -261,7 +269,7 @@ function renderHeader() {
       '<button class="text-btn" type="button" data-act="refresh">Try again</button>';
     if (hadFocus) banner.querySelector('button').focus();
   }
-  else if (snap && state.items.length && Date.now() - (snap.savedAt || snap.publishedAt) > 36 * 3600e3) {
+  else if (snap && state.items.length && oldList()) {
     banner.hidden = false;
     const age = relativeTime(snap.savedAt || snap.publishedAt);
     if (store.get('staleAck', null) === snap.publishedAt) {
@@ -269,7 +277,9 @@ function renderHeader() {
       banner.innerHTML = `<span>List from ${age} · prices may have changed</span>`;
     } else {
       banner.innerHTML = (introWanted
-        ? `<span><b>Clearance deals, shared with you</b> · this list is from ${age} — prices may have changed. <a href="get/">Get the free app</a> for live prices at your store.</span>`
+        ? (matchMedia('(max-width: 480px)').matches
+          ? `<span><b>Shared list from ${age}</b> — prices may have changed. <a href="get/">Get the free app</a></span>`
+          : `<span><b>Clearance deals, shared with you</b> · this list is from ${age} — prices may have changed. <a href="get/">Get the free app</a> for live prices at your store.</span>`)
         : `<span>This shared list is from ${age} — prices may have changed. <a href="get/">Get the app</a> for live prices anytime.</span>`) +
         '<button class="text-btn" type="button" data-act="stale-ok">Got it</button>';
     }
@@ -390,7 +400,7 @@ function renderControls() {
   // Without shelf stock there's nothing store-specific to say (the header already offers the app).
   $('store-line').hidden = !(s && pickupOk);
   $('store-line').innerHTML = s && pickupOk
-    ? `Shelf stock is for <b>${esc(s.name)}</b> · ${esc(storeAddress(s))}. <a href="get/">Check your store</a>`
+    ? `Shelf stock is for <b>${esc(s.name)}</b>${storeAddress(s) ? ' · ' + esc(storeAddress(s)) : ''}. <a href="get/">Check your store</a>`
     : '';
 
   const chips = [];

@@ -192,7 +192,9 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
         if (s.loadError != null && s.needsVerification) return now - lastFailureAt >= STALE_AFTER_MS
         if (s.loadError != null) return s.loadErrorIsOffline || now - lastFailureAt >= RETRY_DELAYS_MS[0]
         val updated = s.lastUpdatedMillis ?: return true
-        return now - updated >= STALE_AFTER_MS
+        // More than a minute in the future: saved while the phone's clock was ahead — its age is unknown.
+        val age = now - updated
+        return age < -60_000 || age >= STALE_AFTER_MS
     }
 
     private suspend fun onNetworkAvailable() {
@@ -567,18 +569,23 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
 
     private inline fun updateFilters(change: (DealUiState) -> DealUiState) {
         _uiState.update { change(it).withDerived() }
+        if (categoryDropped) { categoryDropped = false; savePreferences() }
         savePreferences()
     }
 
     private fun DealUiState.withDerived(): DealUiState {
         // A category that vanished after a refresh would otherwise hide everything.
         val validCategory = category?.takeIf { c -> allDeals.isEmpty() || allDeals.any { it.category.equals(c, true) } }
+        if (category != null && validCategory == null && restored) categoryDropped = true
         val base = copy(category = validCategory)
         return base.copy(
             visibleDeals = DealFilters.apply(allDeals, base.criteria),
             categories = if (allDeals === categoriesFor) categories else DealFilters.topCategories(allDeals).also { categoriesFor = allDeals }
         )
     }
+
+    /** A refresh removed the chosen category: saved preferences are updated after the state change. */
+    private var categoryDropped = false
 
     /** The list [DealUiState.categories] was computed from (they only change when the list does). */
     private var categoriesFor: List<DealItem>? = null
