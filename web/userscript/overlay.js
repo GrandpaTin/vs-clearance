@@ -107,6 +107,8 @@ import {
   fix('sort', (v) => SORTS.some((o) => o.id === v), 'discount');
   fix('inStockOnly', (v) => typeof v === 'boolean', true);
   fix('mode', (v) => v === 'ship' || v === 'pickup', 'ship');
+  if (state.share && !(plain(state.share) && typeof state.share.url === 'string' && /^https:\/\//.test(state.share.url) && typeof state.share.token === 'string')) { state.share = null; put('share', null); }
+  if (state.shareStatus && !plain(state.shareStatus)) { state.shareStatus = null; put('shareStatus', null); }
   // 4. a saved store needs an id and a name (otherwise banners say "at undefined")
   if (!plain(state.store) || state.store.id == null || typeof state.store.name !== 'string' || !state.store.name.trim()) { state.store = null; put('store', null); }
   if (!plain(state.stock) || !plain(state.stock.map) || !Number.isFinite(state.stock.at) || !state.store || state.stock.storeId !== state.store.id) {
@@ -149,7 +151,8 @@ import {
       if (partial && raw.length < 0.8 * state.raw.length) throw new Error('Vitamin Shoppe only sent part of the clearance list.');
       const seen = new Set();
       raw = raw.filter((o) => !seen.has(o.id) && seen.add(o.id));
-      state.partialNote = partial ? `Vitamin Shoppe only sent part of the list (${raw.length} of about ${first.total}).` : null;
+      const about = Number.isFinite(first.total) && first.total > raw.length ? ` (${raw.length} of about ${first.total})` : '';
+      state.partialNote = partial ? `Vitamin Shoppe only sent part of the list${about}.` : null;
       // Clearance is never really empty; an empty answer is a hiccup, so keep the saved list.
       if (!raw.length) throw new Error('Vitamin Shoppe sent an empty clearance list.');
       const previous = state.items;
@@ -158,7 +161,8 @@ import {
       rebuild();
       // New & price drops vs the last COMPLETE list this browser loaded (a partial one would make
       // everything it missed look new next time).
-      const before = get('baseline', null) || Object.fromEntries(previous.map((d) => [d.id, bestPrice(d)]));
+      const saved = get('baseline', null);
+      const before = saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : Object.fromEntries(previous.map((d) => [d.id, bestPrice(d)]));
       if (partial) {
         state.changes = prune(state.changes, state.items);
       } else {
@@ -299,7 +303,8 @@ import {
       <button class="text-btn" data-act="stop-share">Stop</button>`);
   }
 
-  const storeSearch = { query: get('storeQuery', ''), results: [], message: null, searching: false };
+  const savedQuery = get('storeQuery', '');
+  const storeSearch = { query: typeof savedQuery === 'string' ? savedQuery : '', results: [], message: null, searching: false };
   async function searchStores() {
     const q = storeSearch.query.trim();
     const invalid = !q ? 'Enter a ZIP code or city to find stores.' : /^\d+$/.test(q) && q.length !== 5 ? 'ZIP codes have 5 digits.' : null;
@@ -410,7 +415,9 @@ import {
   }
   window.addEventListener('online', () => {
     if (!state.open) return;
-    if (state.error || listIsOld()) loadDeals(); else if (state.stockError || stockIsDue()) loadStock();
+    const listDue = state.error ? !state.blocked && !state.siteChanged : listIsOld();
+    const stockDue = state.stockError ? !state.stockBlocked : stockIsDue();
+    if (listDue) loadDeals(); else if (stockDue && !state.blocked) loadStock({ onlyMissing: gapsOnly() });
   });
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible' || !state.open) return;
@@ -424,6 +431,7 @@ import {
   setInterval(() => {
     if (!state.open || document.visibilityState !== 'visible' || state.loading || state.stockLoading) return;
     const now = Date.now();
+    if (state.blocked || state.stockBlocked) { keepFocus(renderBanner); refreshAges(); return; } // waiting on the person-check
     if (state.error) { if (!state.blocked && !state.siteChanged && now >= nextErrorRetry) return loadDeals(); }
     else if (!state.blocked && listIsOld()) return loadDeals();
     if (state.stockError) {
@@ -792,11 +800,14 @@ import {
         }
         return;
       }
-      case 'retry-stock':
+      case 'retry-stock': {
+        const bannerBefore = lastBannerHtml;
         await loadStock({ onlyMissing: gapsOnly() });
         if (!state.stockError && state.store) toast(`Shelf stock updated for ${state.store.name}`);
-        else if (state.stockError && state.store && !ref('banner').textContent.trim()) toast(`Still couldn't check shelf stock at ${state.store.name}`);
+        // A changed banner is announced by itself; an identical one isn't, so say it here.
+        else if (state.stockError && state.store && (lastBannerHtml === bannerBefore || !ref('banner').textContent.trim())) toast(`Still couldn't check shelf stock at ${state.store.name}`);
         return;
+      }
       case 'reload-page':
         // Back where they were after the check: the store sheet reopens (and searches) if it was open.
         try { if (state.sheet === 'stores') sessionStorage.setItem('vsx.reopen', 'stores'); } catch { /* private mode */ }
@@ -918,7 +929,7 @@ import {
   root.addEventListener('keydown', (e) => {
     if (e.key !== 'Tab' || !state.open) return;
     const box = state.sheet ? ref('sheet') : app;
-    const items = [...box.querySelectorAll('a[href], button:not([disabled]), input, select, textarea, [tabindex]:not([tabindex="-1"])')]
+    const items = [...box.querySelectorAll('a[href]:not([tabindex="-1"]), button:not([disabled]):not([tabindex="-1"]), input, select, textarea, [tabindex]:not([tabindex="-1"])')]
       .filter((el) => el.offsetParent !== null);
     if (!items.length) return;
     const first = items[0], last = items[items.length - 1];
@@ -1037,6 +1048,10 @@ import {
     if (/^#vsdeals-share=/.test(location.hash)) {
       // Same tab, already on the site: the script doesn't re-run, so pair here.
       const paired = takePairing() === 'ok';
+      if (!host.isConnected) {
+        pendingPaired = paired ? 'ok' : 'invalid';
+        try { sessionStorage.setItem('vsx.reopen', paired ? 'app-paired' : 'app'); } catch { /* private mode */ }
+      }
       openApp();
       if (paired && state.raw.length && !listIsOld()) publish();
       return;

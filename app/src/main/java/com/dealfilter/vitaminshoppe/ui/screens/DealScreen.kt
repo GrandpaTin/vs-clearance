@@ -347,9 +347,9 @@ fun DealScreenContent(state: DealUiState, viewModel: DealActions, modifier: Modi
                 val stockUnknown = state.mode == FulfillmentMode.PICKUP && state.selectedStore != null &&
                     state.hasData && state.allDeals.none { it.storeQuantity != null }
                 // What's on this shelf before search / category / discount: the shelf states only apply when that's empty.
-                val shelf = if (state.mode == FulfillmentMode.PICKUP) DealFilters.apply(
-                    state.allDeals, state.criteria.copy(query = "", category = null, minDiscount = 0, onlyIds = null)
-                ) else null
+                // Everything available in this mode (shelf in pickup; "in stock" in ship) before search and filters.
+                val available = DealFilters.apply(state.allDeals, state.criteria.copy(query = "", category = null, minDiscount = 0, onlyIds = null))
+                val shelf = if (state.mode == FulfillmentMode.PICKUP) available else null
                 val shelfEmpty = shelf?.isEmpty() == true
                 val stockBlocked = state.mode == FulfillmentMode.PICKUP && shelfEmpty &&
                     (state.isStockLoading || state.stockError != null || stockUnknown)
@@ -381,7 +381,7 @@ fun DealScreenContent(state: DealUiState, viewModel: DealActions, modifier: Modi
                         Surface(color = MaterialTheme.colorScheme.background) {
                             SummaryRow(
                                 shown = state.visibleDeals.size,
-                                total = shelf?.size ?: state.allDeals.size,
+                                total = available.size,
                                 onShelf = shelf != null && state.selectedStore != null,
                                 sort = state.sort,
                                 onSort = viewModel::onSort,

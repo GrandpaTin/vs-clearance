@@ -11,11 +11,11 @@ import com.dealfilter.vitaminshoppe.data.remote.VsApi
  */
 class DealRepository(private val fetcher: JsonFetcher) {
 
-    /** Every clearance product, across all listing pages. */
     /** How many products the site said the last clearance listing had (0 before the first fetch). */
     @Volatile var lastReportedTotal = 0
         private set
 
+    /** Every clearance product, across all listing pages. */
     suspend fun fetchClearance(): List<DealItem> {
         val first = VsApi.parseClearancePage(fetcher.getJson(VsApi.clearanceUrl(1)))
         lastReportedTotal = first.totalProducts

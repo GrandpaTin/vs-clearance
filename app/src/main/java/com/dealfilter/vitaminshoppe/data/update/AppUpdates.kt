@@ -117,7 +117,12 @@ open class AppUpdater(
         if (result.isFailure) {
             // Offline or GitHub hiccup: keep any update already found (and its download) as it is.
             _state.update { it.copy(isChecking = false) }
-            return@withLock if (result.exceptionOrNull() is IOException) "Couldn't check for updates — you're offline." else "Couldn't check for updates right now."
+            val e = result.exceptionOrNull()
+            return@withLock when (e) {
+                is java.net.UnknownHostException, is java.net.ConnectException -> "Couldn't check for updates — you're offline."
+                is IOException -> "GitHub didn't answer — try again later."
+                else -> "Couldn't check for updates right now."
+            }
         }
         if (downloadJob?.isActive == true) {
             // Finish the download in progress; a newer release is offered on the next check.

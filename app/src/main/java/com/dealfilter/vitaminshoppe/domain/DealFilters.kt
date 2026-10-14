@@ -97,12 +97,12 @@ object DealFilters {
     /** Most common categories in the current list, for the quick-filter chips. */
     fun topCategories(items: List<DealItem>, limit: Int = 10): List<String> =
         items.mapNotNull { it.category?.trim()?.takeIf(String::isNotEmpty) }
-            .groupingBy { it }
-            .eachCount()
-            .entries
-            .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
+            .groupBy { it.lowercase(java.util.Locale.US) }
+            .values
+            .map { spellings -> spellings.groupingBy { it }.eachCount().maxByOrNull { it.value }!!.key to spellings.size }
+            .sortedWith(compareByDescending<Pair<String, Int>> { it.second }.thenBy { it.first })
             .take(limit)
-            .map { it.key }
+            .map { it.first }
 }
 
 /**

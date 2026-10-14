@@ -7,6 +7,8 @@ const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'core.js', 'boot-chec
 function saveIfList(res) {
   return res.clone().json().then((j) => {
     if (!j || !Array.isArray(j.items)) return;
+    // Rows but none usable (no link or price): don't let a broken list replace the good offline copy.
+    if (j.items.length && !j.items.some((o) => o && typeof o.url === 'string' && Number(o.site) > 0)) return;
     const headers = new Headers(res.headers);
     return caches.open(LIST_CACHE).then((c) => c.put('api/snapshot', new Response(JSON.stringify(j), { status: 200, headers })));
   }).catch(() => {});

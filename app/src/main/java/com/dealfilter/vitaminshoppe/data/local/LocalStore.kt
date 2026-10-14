@@ -90,8 +90,11 @@ class LocalStore(context: Context) {
             val tmp = File(cacheFile.parentFile, cacheFile.name + ".tmp")
             tmp.writeText(root.toString())
             if (!tmp.renameTo(cacheFile)) {
-                cacheFile.delete()
-                tmp.renameTo(cacheFile)
+                // Keep the old copy until the new one is in place.
+                val bak = File(cacheFile.parentFile, cacheFile.name + ".bak")
+                bak.delete()
+                cacheFile.renameTo(bak)
+                if (tmp.renameTo(cacheFile)) bak.delete() else bak.renameTo(cacheFile)
             }
         }
     }

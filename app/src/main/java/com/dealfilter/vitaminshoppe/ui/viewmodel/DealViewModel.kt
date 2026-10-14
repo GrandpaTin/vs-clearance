@@ -285,13 +285,14 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
     // Loading
     // -------------------------------------------------------------------------------------------
 
-    /** The user asked: start over on retries and forget an earlier "not now" on the site's check. */
-    /** "Load anyway" on the short-list banner: accept the shorter list this time. */
+    /** "Load anyway" on the short-list banner: accept the shorter list on this (user) run only. */
     override fun loadShortListAnyway() {
+        if (loadJobAuto) loadJob?.cancel() // a quiet run in progress mustn't pick up the user's choice
         acceptShortOnce = true
         refresh()
     }
 
+    /** The user asked: start over on retries and forget an earlier "not now" on the site's check. */
     override fun refresh() {
         // A background refresh is already running: if it ends needing the site's check, run the user's own
         // refresh right after so the real check is shown (a quiet run never shows it).
@@ -312,6 +313,9 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
     private fun refreshInternal(auto: Boolean) {
         if (loadJob?.isActive == true) return
         loadJobAuto = auto
+        // Taken by this run only (a user run), so a failed "Load anyway" can't linger into a later one.
+        val acceptShort = acceptShortOnce && !auto
+        acceptShortOnce = false
         loadJob = viewModelScope.launch {
             // An automatic try while offline keeps the offline banner up (no "Refreshing…" flash, no
             // TalkBack re-announcement); the screen only changes if it gets through.
@@ -332,9 +336,7 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
                 // If the count itself is missing (0), a second refresh by the user takes the list anyway.
                 val reported = repository.lastReportedTotal
                 val suspicious = before >= 20 && fetched.size < before / 5 && (reported == 0 || fetched.size < reported * 0.8)
-                val accept = acceptShortOnce
-                acceptShortOnce = false
-                if (suspicious && !accept) {
+                if (suspicious && !acceptShort) {
                     shortRejected = true
                     throw FetchException.BadData("Vitamin Shoppe's list came back much shorter than usual — keeping your saved deals.")
                 }
@@ -364,6 +366,7 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
                 }
                 autoFailures = 0
                 userWaiting = false
+                afterVerification.remove("refresh") // the list came in: nothing left to redo after a check
                 if (categoryDropped) { categoryDropped = false; savePreferences() }
                 // Save the fresh list now, keeping the last good stock for the same store until
                 // the new stock check finishes (it may fail or the app may be killed meanwhile).
@@ -410,6 +413,7 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
 
     /** All stock loads go through here so a newer store always cancels the older load. */
     private fun startStockLoad(store: StoreLocation, announce: Boolean = false, quiet: Boolean = false) {
+        if (!quiet) afterVerification.remove("stock") // this run is the retry
         // A check that was going to announce "N on the shelf" for this store still does when restarted.
         val announceNow = announce || (stockJob?.isActive == true && announcingFor == store.storeId)
         announcingFor = if (announceNow) store.storeId else null
@@ -441,6 +445,8 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
                 if (s.selectedStore?.storeId == store.storeId) {
                     lastStock = store.storeId to stock
                     stockFailures = 0
+                    afterVerification.remove("stock")
+                    _uiState.update { it.copy(stockNeedsVerification = false) }
                     persistCache(s.allDeals, s.lastUpdatedMillis ?: System.currentTimeMillis(), store.storeId, stock)
                 }
             } catch (e: CancellationException) {

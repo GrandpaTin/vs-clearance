@@ -230,7 +230,7 @@ fun CategoryChips(
             FilterChip(
                 selected = onlyChanges,
                 onClick = { onOnlyChanges(!onlyChanges) },
-                label = { Text("New & price drops ($changeCount)", maxLines = 1) },
+                label = { Text(if (changeCount > 0) "New & price drops ($changeCount)" else "New & price drops", maxLines = 1) },
                 leadingIcon = {
                     Icon(
                         if (onlyChanges) Icons.Default.Check else Icons.Outlined.AutoAwesome,

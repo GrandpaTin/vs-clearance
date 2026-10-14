@@ -109,13 +109,18 @@ async function load({ manual = false } = {}) {
     let snap, raw;
     try {
       raw = await res.text();
+      // A page instead of data: almost always Wi-Fi that wants you to sign in first.
+      if (/^\s*</.test(raw)) throw Object.assign(new Error('portal'), { portal: true });
       snap = JSON.parse(raw);
+      // Rows but none usable: a broken list — keep the good one on screen (and offline) instead.
+      if (hadList && snap && Array.isArray(snap.items) && snap.items.length && !snap.items.some(isUsableItem)) throw new Error('no usable rows');
       acceptSnapshot(snap);
-    } catch {
+    } catch (err) {
+      if (err && err.portal) throw err;
       throw Object.assign(new Error('unreadable'), { unreadable: true });
     }
     // Keep a good list for offline use (the service worker doesn't see a first visit's download).
-    if (!fromCache && window.caches) {
+    if (!fromCache && window.caches && (state.items.length || !snap.items.length)) {
       caches.open('vs-list').then((c) => c.put('api/snapshot', new Response(raw, { headers: { 'Content-Type': 'application/json' } }))).catch(() => {});
     }
     // Only now: an ETag for a list that couldn't be read would make every retry a "nothing new" 304.
@@ -130,14 +135,17 @@ async function load({ manual = false } = {}) {
   } catch (e) {
     if (abort.superseded) { changed = false; return; } // a newer attempt took over
     if (e && e.unreadable) state.etag = null;
-    const failure = navigator.onLine === false ? 'offline' : e && e.unreadable ? 'bad' : e && e.status >= 500 ? 'server' : 'failed';
+    const failure = navigator.onLine === false ? 'offline' : e && e.portal ? 'portal' : e && e.unreadable ? 'bad' : e && e.status >= 500 ? 'server' : 'failed';
     if (!manual && !wasLoading && state.snapshot && failure !== 'offline' && before !== 'offline' && ++quietFailures < 2) {
       changed = false;
       return; // flaky mobile data: wait for the next check before warning
     }
     state.error = failure;
     // The banner says it; a toast is only needed when the banner was already up (nothing visibly changes).
-    if (manual && state.snapshot && before === state.error) toast(state.error === 'offline' ? 'Still offline' : state.error === 'slow' ? 'Connection is still slow' : 'Still couldn’t check for updates');
+    if (manual && state.snapshot && before === state.error) toast({
+      offline: 'Still offline', slow: 'Connection is still slow', bad: 'Still couldn’t read the latest list',
+      server: 'The deals server still has a problem', portal: 'This Wi-Fi still needs you to sign in'
+    }[state.error] || 'Still couldn’t check for updates');
     changed = !state.snapshot;
   } finally {
     if (inflight === abort) inflight = null;
@@ -288,7 +296,8 @@ function renderHeader() {
   if (snap && state.error) {
     banner.hidden = false;
     const shown = oldList() ? `showing the list from ${relativeTime(snap.savedAt || snap.publishedAt)} — prices may have changed` : 'showing the last deals loaded';
-    const why = state.error === 'offline' ? 'You’re offline' : state.error === 'slow' ? 'Connection is slow' : state.error === 'bad' ? 'Couldn’t read the latest list' : 'Couldn’t check for updates';
+    const why = state.error === 'offline' ? 'You’re offline' : state.error === 'slow' ? 'Connection is slow' : state.error === 'portal' ? 'This Wi-Fi may need you to sign in'
+      : state.error === 'bad' ? 'Couldn’t read the latest list' : 'Couldn’t check for updates';
     banner.innerHTML = `<span>${why} · ${shown}.</span>` +
       '<button class="text-btn" type="button" data-act="refresh">Try again</button>';
     if (hadFocus) banner.querySelector('button').focus();
@@ -355,6 +364,7 @@ function renderBody() {
         ? 'You seem to be offline. Check your connection and try again.'
         : state.error === 'bad' ? 'The shared list couldn’t be read. Try again in a minute.'
         : state.error === 'server' ? 'The deals server had a problem. Try again in a minute.'
+        : state.error === 'portal' ? 'This Wi-Fi may need you to sign in — open any website to sign in, then try again.'
         : 'The deals server didn’t answer. Try again in a minute.', [['Try again', 'retry', true]]);
     return;
   }
@@ -365,7 +375,7 @@ function renderBody() {
   const total = state.mode === 'pickup'
     ? applyFilters(state.items, { mode: 'pickup' }).length
     : state.items.length;
-  const unit = state.mode === 'pickup' ? 'in store' : 'deals';
+  const unit = state.mode === 'pickup' ? 'in store' : total === 1 ? 'deal' : 'deals';
   $('count').textContent = deals.length === total ? `${total} ${unit}` : `${deals.length} of ${total}`;
   $('count').setAttribute('aria-label', `Showing ${deals.length} of ${total} deals`);
   $('ask-ai').hidden = deals.length === 0;
@@ -448,7 +458,7 @@ function renderControls() {
   for (const f of none ? [] : FLOORS) {
     const n = atLeast(f);
     // "Any discount" that would show exactly what the active floor shows is just noise (Clear resets it).
-    if (!f && state.floor && n === nActive) { prev = n; continue; }
+    if (!f && (!state.floor || n === nActive)) { prev = n; continue; } // only shown as the way back from a floor
     if (f && (n === 0 || n > prev * 0.97) && state.floor !== f) continue;
     prev = n;
     chips.push(`<button class="chip" data-act="floor" data-v="${f}" aria-pressed="${f > 0 && state.floor === f}">${f ? f + '%+ off' : 'Any discount'} <span class="n">${n}</span></button>`);
@@ -756,7 +766,7 @@ $('ask-ai').addEventListener('click', () => {
   const deals = visible();
   if (!deals.length) return toast('No deals to review — loosen your filters first.');
   const s = hasStock() ? state.snapshot.store : null;
-  promptText = aiPrompt(deals, deals.length, s, state.mode);
+  promptText = aiPrompt(deals, deals.length, s, state.mode, (SORTS.find((o) => o.id === state.sort) || {}).label);
   const shown = Math.min(deals.length, AI_MAX_ITEMS);
   const scope = [state.mode === 'pickup' && s ? `On the shelf at ${s.name}` : hasStock() && 'Ship to home',
     state.floor && `${state.floor}%+ off`, state.category, state.query && `“${state.query.trim()}”`].filter(Boolean).join(' · ');
@@ -786,6 +796,7 @@ $('copy-prompt').addEventListener('click', async () => {
       ? 'Couldn’t copy automatically — the prompt is selected below. Press and hold it, then choose Copy.'
       : `Couldn’t copy automatically — the prompt is selected below. Press ${/Mac/i.test(navigator.platform) ? '⌘C' : 'Ctrl+C'} to copy it.`;
     $('prompt-details').open = true;
+    $('ai-links').hidden = false;
     const range = document.createRange();
     range.selectNodeContents($('prompt-text'));
     const sel = getSelection(); sel.removeAllRanges(); sel.addRange(range);
@@ -798,7 +809,13 @@ $('share-prompt').addEventListener('click', async () => {
     await navigator.share({ title: 'Vitamin Shoppe clearance deals to review', text: promptText });
   } catch (e) {
     if (e && e.name === 'AbortError') return; // closed the share sheet
-    $('copy-prompt').click(); // in-app browsers refuse share: copy (or select) the prompt instead
+    // In-app browsers refuse share, and after that a copy isn't allowed either: show the prompt selected.
+    $('prompt-details').open = true;
+    $('ai-links').hidden = false;
+    const range = document.createRange();
+    range.selectNodeContents($('prompt-text'));
+    const sel = getSelection(); sel.removeAllRanges(); sel.addRange(range);
+    $('copy-note').textContent = 'Sharing isn’t available here — the prompt is selected below. Press and hold it, then choose Copy.';
   }
 });
 $('prompt-dialog').addEventListener('click', (e) => { if (e.target === $('prompt-dialog')) $('prompt-dialog').close(); });

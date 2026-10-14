@@ -319,7 +319,7 @@ export function prune(ch, current) {
 
 // ---------------------------------------------------------------------------- AI prompt
 
-export function aiPrompt(deals, total, store, mode) {
+export function aiPrompt(deals, total, store, mode, sortLabel = null) {
   const shown = deals.slice(0, AI_MAX_ITEMS);
   // A store without online pickup: everything there is walk-in only.
   const walkInStore = !!store && store.pickup === false;
@@ -327,7 +327,8 @@ export function aiPrompt(deals, total, store, mode) {
     ? `on the shelf at ${/vitamin shoppe/i.test(store.name) ? store.name : 'The Vitamin Shoppe, ' + store.name}${storeAddress(store) ? ` (${storeAddress(store)})` : ''}${walkInStore ? ' — walk-in only (this store has no online pickup)' : shown.some((d) => !d.pickup) ? ' — some walk-in only (no online pickup)' : ', all available for store pickup'}`
     : store ? `from The Vitamin Shoppe online (stock also checked at ${store.name})` : 'from The Vitamin Shoppe online';
   const scope = total > shown.length
-    ? `These are the top ${shown.length} of ${total} deals matching my filters.`
+    ? (sortLabel ? `These are the first ${shown.length} of ${total} deals matching my filters, sorted by ${sortLabel.toLowerCase()}.`
+      : `These are the top ${shown.length} of ${total} deals matching my filters.`)
     : `These are all ${shown.length} deals matching my filters.`;
   const cartNote = shown.some((d) => cartEstimate(d) != null)
     ? '\nNote: prices marked "≈ in cart" are estimates — the site applies that clearance discount only at checkout.\n' : '';
