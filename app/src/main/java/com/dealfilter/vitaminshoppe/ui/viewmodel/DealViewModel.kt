@@ -79,6 +79,9 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
     /** Automatic retries after a failed refresh, spaced out so a struggling site isn't hammered. */
     private var autoRetryJob: Job? = null
     private var autoFailures = 0
+
+    /** The user asked to refresh while a background refresh was running. */
+    private var userWaiting = false
     private var lastFailureAt = 0L
 
     /** The last refresh's list looked broken (far too short) and was kept out; the user can insist. */
@@ -93,6 +96,9 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
 
     /** The store whose running stock check will announce its shelf count when done. */
     private var announcingFor: String? = null
+
+    /** Whether the running stock check was started in the background (vs. by the user). */
+    private var stockJobQuiet = true
 
     /** When the user closed the site's check; automatic refreshes leave them alone for a while after. */
     private var verificationDeclinedAt = 0L
@@ -261,6 +267,9 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
 
     /** The user asked: start over on retries and forget an earlier "not now" on the site's check. */
     override fun refresh() {
+        // A background refresh is already running: if it ends needing the site's check, run the user's own
+        // refresh right after so the real check is shown (a quiet run never shows it).
+        if (loadJob?.isActive == true) userWaiting = true
         autoFailures = 0
         stockFailures = 0
         autoRetryJob?.cancel()
@@ -314,19 +323,27 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
                     ).withDerived()
                 }
                 autoFailures = 0
+                userWaiting = false
                 // Save the fresh list now, keeping the last good stock for the same store until
                 // the new stock check finishes (it may fail or the app may be killed meanwhile).
                 val store = _uiState.value.selectedStore
                 // With a store, the stock check that follows publishes (once, with fresh stock).
                 persistCache(items, now, carried?.first, carried?.second ?: emptyMap(), publish = store == null)
-                if (store != null) startStockLoad(store, quiet = auto) else stockJob?.cancel()
+                // A stock check the user started (picking a store) stays a user action when restarted.
+                if (store != null) startStockLoad(store, quiet = auto && !(stockJob?.isActive == true && !stockJobQuiet)) else stockJob?.cancel()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: FetchException.VerificationRequired) {
                 afterVerification["refresh"] = { refreshInternal(auto = false) }
+                if (auto && userWaiting) {
+                    userWaiting = false
+                    val job = loadJob
+                    viewModelScope.launch { job?.join(); refreshInternal(auto = false) }
+                }
                 lastFailureAt = System.currentTimeMillis()
                 _uiState.update { it.copy(status = LoadStatus.IDLE, loadError = e.message, needsVerification = true) }
             } catch (e: FetchException) {
+                userWaiting = false
                 _uiState.update {
                     it.copy(status = LoadStatus.IDLE, loadError = e.message, loadErrorIsOffline = e is FetchException.Offline)
                 }
@@ -345,6 +362,7 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
         // A check that was going to announce "N on the shelf" for this store still does when restarted.
         val announceNow = announce || (stockJob?.isActive == true && announcingFor == store.storeId)
         announcingFor = if (announceNow) store.storeId else null
+        stockJobQuiet = quiet
         stockJob?.cancel()
         val items = _uiState.value.allDeals
         if (items.isEmpty()) {

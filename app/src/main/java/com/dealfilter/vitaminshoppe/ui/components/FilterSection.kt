@@ -226,7 +226,7 @@ fun CategoryChips(
             .padding(horizontal = 12.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        if (changeCount > 0) {
+        if (changeCount > 0 || onlyChanges) {
             FilterChip(
                 selected = onlyChanges,
                 onClick = { onOnlyChanges(!onlyChanges) },

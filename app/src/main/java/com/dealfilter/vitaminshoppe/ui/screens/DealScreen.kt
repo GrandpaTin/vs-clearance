@@ -104,6 +104,7 @@ import com.dealfilter.vitaminshoppe.ui.viewmodel.DealActions
 import com.dealfilter.vitaminshoppe.ui.viewmodel.DealUiState
 import com.dealfilter.vitaminshoppe.data.remote.WebPublisher
 import com.dealfilter.vitaminshoppe.data.remote.WebShareState
+import com.dealfilter.vitaminshoppe.domain.DealFilters
 import androidx.compose.material3.AlertDialog
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -337,8 +338,12 @@ fun DealScreenContent(state: DealUiState, viewModel: DealActions, modifier: Modi
                         modifier = Modifier.padding(top = 12.dp, bottom = 8.dp)
                     )
                 }
+                // Pickup with a store whose shelves haven't been checked yet (app closed mid-check, offline):
+                // no item has a count, so an empty list means "unknown", not "nothing there".
+                val stockUnknown = state.mode == FulfillmentMode.PICKUP && state.selectedStore != null &&
+                    state.hasData && state.allDeals.none { it.storeQuantity != null }
                 val stockBlocked = state.mode == FulfillmentMode.PICKUP && state.visibleDeals.isEmpty() &&
-                    (state.isStockLoading || state.stockError != null)
+                    (state.isStockLoading || state.stockError != null || stockUnknown)
                 if (state.hasData && !stockBlocked) {
                     item(key = "discount") {
                         DiscountChips(
@@ -414,6 +419,21 @@ fun DealScreenContent(state: DealUiState, viewModel: DealActions, modifier: Modi
                             title = "Checking shelves…",
                             body = "Looking up stock at ${state.selectedStore?.name ?: "your store"}.",
                             showProgress = true
+                        )
+                    }
+                    stockUnknown && state.visibleDeals.isEmpty() && state.stockError == null -> item(key = "stockUnknown") {
+                        if (state.status == LoadStatus.REFRESHING) StatusMessage(
+                            icon = Icons.Default.Storefront,
+                            title = "Checking shelves…",
+                            body = "Getting the latest list, then stock at ${state.selectedStore?.name ?: "your store"}.",
+                            showProgress = true
+                        ) else StatusMessage(
+                            icon = Icons.Default.Storefront,
+                            title = "Shelf stock not checked yet",
+                            body = "VS Clearance hasn't checked the shelves at ${state.selectedStore?.name ?: "your store"} yet." +
+                                if (state.loadErrorIsOffline) " Connect to the internet, then check." else "",
+                            primary = "Check shelves" to viewModel::retryStock,
+                            secondary = "Show ship-to-home" to { viewModel.onModeChange(FulfillmentMode.SHIP) }
                         )
                     }
                     state.mode == FulfillmentMode.PICKUP && state.stockError != null && state.visibleDeals.isEmpty() -> item(key = "stockFailed") {
@@ -494,8 +514,8 @@ private const val HEADER_ITEMS = 3
 private fun changedInMode(state: DealUiState): Int {
     val ids = state.changes.newIds + state.changes.priceDrops.keys
     if (ids.isEmpty()) return 0
-    val pickup = state.mode == FulfillmentMode.PICKUP && state.selectedStore != null
-    return state.allDeals.count { it.id in ids && (!pickup || it.isInStockAtStore) }
+    // Same availability rules as the list (pickup shelf, "In stock" in ship mode), no other filters.
+    return DealFilters.apply(state.allDeals, state.criteria.copy(query = "", category = null, minDiscount = 0, onlyIds = ids)).size
 }
 
 private fun clearDescription(state: DealUiState): String {

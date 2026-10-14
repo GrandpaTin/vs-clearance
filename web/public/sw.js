@@ -33,6 +33,9 @@ self.addEventListener('activate', (e) => {
     .then(() => self.clients.claim()));
 });
 
+/** Until when the network counts as hanging (set when a request had to fall back to the saved copy). */
+let slowUntil = 0;
+
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET' || url.origin !== self.location.origin) return;
@@ -67,6 +70,7 @@ self.addEventListener('fetch', (e) => {
   // A request that hangs (weak in-store signal) answers from the saved copy after 3.5 s; the network
   // copy still lands in the cache for next time. A first visit (nothing saved) just waits.
   const network = fetch(e.request, { cache: 'no-cache' }).then((res) => {
+    slowUntil = 0; // the network answered: back to network-first
     if (res.ok) { const copy = res.clone(); caches.open(VERSION).then((c) => c.put(e.request, copy)); }
     return res;
   });
@@ -77,6 +81,11 @@ self.addEventListener('fetch', (e) => {
       ? caches.match(url.pathname.includes('/get') ? 'get/' : 'index.html').then((r) => r || Response.error())
       : Response.error());
     if (!cached) return network.catch(fallback);
-    return Promise.race([network.catch(fallback), new Promise((resolve) => setTimeout(() => resolve(cached), 3500))]);
+    // Once a request has hung, the next ones (scripts, styles) don't each wait 3.5 s more.
+    if (Date.now() < slowUntil) return cached;
+    return Promise.race([network.catch(fallback), new Promise((resolve) => setTimeout(() => {
+      slowUntil = Date.now() + 30_000;
+      resolve(cached);
+    }, 3500))]);
   }));
 });

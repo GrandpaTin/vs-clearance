@@ -247,18 +247,24 @@ import {
   const storeSearch = { query: get('storeQuery', ''), results: [], message: null, searching: false };
   async function searchStores() {
     const q = storeSearch.query.trim();
-    if (!q) { storeSearch.message = 'Enter a ZIP code or city to find stores.'; storeSearch.blocked = false; return renderSheet(); }
-    if (/^\d+$/.test(q) && q.length !== 5) { storeSearch.message = 'ZIP codes have 5 digits.'; storeSearch.blocked = false; return renderSheet(); }
+    const invalid = !q ? 'Enter a ZIP code or city to find stores.' : /^\d+$/.test(q) && q.length !== 5 ? 'ZIP codes have 5 digits.' : null;
+    if (invalid) {
+      storeSearch.message = invalid; storeSearch.blocked = false; renderSheet();
+      const input = ref('sheet').querySelector('form input');
+      if (input) input.focus({ preventScroll: true });
+      return;
+    }
     storeSearch.searching = true; storeSearch.message = null; storeSearch.blocked = false; renderSheet();
     put('storeQuery', q);
     try {
       const { stores, status } = parseStores(await getJson(storeSearchUrl(q)));
-      storeSearch.results = stores;
+      storeSearch.results = stores; storeSearch.resultsFor = q;
       storeSearch.message = status === 'none' ? `No Vitamin Shoppe stores near “${q}”.`
         : status === 'unrecognized' ? `Couldn't find “${q}”. Try a 5-digit ZIP or “City, ST”.` : null;
       put('storeQuery', q);
     } catch (e) {
       storeSearch.blocked = e instanceof Blocked;
+      if (storeSearch.resultsFor !== q) storeSearch.results = [];
       storeSearch.message = storeSearch.blocked || /try again/i.test(e.message) ? e.message : `${e.message.replace(/\.?$/, '.')} Try again in a minute.`;
     } finally {
       storeSearch.searching = false; renderSheet();
@@ -357,6 +363,7 @@ import {
       ref('subtitle').textContent = `Updated ${relativeTime(state.savedAt)}` + (n ? ` · ${n} new or cheaper` : '');
     }
     keepFocus(renderBanner);
+    keepFocus(renderShareLine);
   }, 60_000);
 
   function closeApp() {
@@ -387,9 +394,11 @@ import {
         : '<button class="link-btn" data-act="hide-launcher">Hide the <span aria-hidden="true">🏷️</span> Deals button</button>') + '</span>');
   }
 
+  /** An age inside a live region: shown, but not re-read every minute as it ticks ("earlier" is spoken). */
+  const quietAge = (ms) => `<span aria-hidden="true">${relativeTime(ms)}</span><span class="vh">earlier</span>`;
   const savedPhrase = () => {
     const ago = relativeTime(state.savedAt);
-    return ago === 'just now' ? 'keeping the list on screen' : `showing the list saved ${ago}`;
+    return ago === 'just now' ? 'keeping the list on screen' : `showing the list saved ${quietAge(state.savedAt)}`;
   };
 
   /** Only touches a region when its content changed, so a no-change render keeps focus and scroll. */
@@ -414,7 +423,8 @@ import {
     const regionEl = a && a.parentElement ? a.parentElement.closest('[data-ref]') : null;
     const region = regionEl ? regionEl.dataset.ref : null;
     fn();
-    if (kind && state.open && !(root.activeElement && root.activeElement.isConnected)) {
+    const now = root.activeElement;
+    if (kind && state.open && !(now && now.isConnected && now.offsetParent)) {
       const all = [...root.querySelectorAll(`[data-${kind}]`)].filter((el) => el.dataset[kind] === id && el.offsetParent);
       const pick = (list) => (v == null ? null : list.find((el) => el.dataset.v === v)) || list[0];
       const inRegion = region ? all.filter((el) => { const r = el.parentElement && el.parentElement.closest('[data-ref]'); return r && r.dataset.ref === region; }) : [];
@@ -423,11 +433,17 @@ import {
       const next = id === 'retry-stock' ? root.querySelector('.store-row')
         : id === 'refresh' ? root.querySelector('[data-card]') || ref('q') : null;
       const same = pick(inRegion) || (region && next && next.offsetParent ? next : null) || pick(all) || (next && next.offsetParent ? next : null);
-      (same || app).focus({ preventScroll: true });
+      const list = root.querySelector('[data-card]');
+      (same || (list && list.offsetParent ? list : null) || (ref('q').offsetParent ? ref('q') : null) || app).focus({ preventScroll: true });
       if (same && same.classList.contains('chip')) same.scrollIntoView({ inline: 'nearest', block: 'nearest' });
     }
   }
   function render() { keepFocus(renderNow); }
+  // The status panel through setHtml: identical content isn't rewritten, so it isn't announced twice.
+  const statusPanel = {
+    set innerHTML(html) { setHtml(ref('status'), html); },
+    set hidden(v) { ref('status').hidden = v; }
+  };
   function renderNow() {
     if (!state.open) return;
     renderFootNote();
@@ -439,7 +455,7 @@ import {
 
     renderBanner();
 
-    const list = ref('list'); const status = ref('status');
+    const list = ref('list'); const status = statusPanel;
     const have = state.items.length > 0;
     ref('controls').hidden = !have; ref('summary').hidden = !have;
     if (!have) {
@@ -497,16 +513,16 @@ import {
     } else if (state.partialNote) {
       html = `<div class="banner warn"><span>${esc(state.partialNote)}</span><button class="text-btn" data-act="refresh">Retry</button></div>`;
     } else if (state.stockError && state.mode === 'ship') {
-      const shipAge = hasStock() && Date.now() - state.stock.at > 10 * 60_000 ? ` · showing stock checked ${relativeTime(state.stock.at)}` : '';
+      const shipAge = hasStock() && Date.now() - state.stock.at > 10 * 60_000 ? ` · showing stock checked ${quietAge(state.stock.at)}` : '';
       html = `<div class="banner info"><span>Shelf stock at ${esc(state.store?.name || 'your store')} ${state.stockBlocked ? 'needs a quick check' : "couldn't be checked"}${shipAge}.</span><button class="text-btn" data-act="${state.stockBlocked ? 'reload-page' : 'retry-stock'}">${state.stockBlocked ? 'Reload page' : 'Retry'}</button></div>`;
     } else if (state.stockError && !(state.mode === 'pickup' && (!hasStock() || !visible().length))) {
       // (In pickup with nothing to show, the full-page panel below says it instead.)
       // The age only matters when the counts on screen are from an earlier check.
-      const age = hasStock() && Date.now() - state.stock.at > 10 * 60_000 ? ` · showing stock checked ${relativeTime(state.stock.at)}` : '';
+      const age = hasStock() && Date.now() - state.stock.at > 10 * 60_000 ? ` · showing stock checked ${quietAge(state.stock.at)}` : '';
       html = `<div class="banner bad"><span>${esc(state.stockError.replace(/\.$/, ''))}${age}.${state.stockAdvice ? ' ' + esc(state.stockAdvice) : ''}</span><button class="text-btn" data-act="${state.stockBlocked ? 'reload-page' : 'retry-stock'}">${state.stockBlocked ? 'Reload page' : 'Retry'}</button></div>`;
     } else if (hasStock() && !state.stockLoading && Date.now() - (state.stock.at || 0) > 6 * 3600e3) {
       // 7. shelf stock's age said once, not on every card
-      html = `<div class="banner info"><span>Shelf stock at ${esc(state.store.name)} was checked ${relativeTime(state.stock.at)}.</span><button class="text-btn" data-act="retry-stock">Check now</button></div>`;
+      html = `<div class="banner info"><span>Shelf stock at ${esc(state.store.name)} was checked ${quietAge(state.stock.at)}.</span><button class="text-btn" data-act="retry-stock">Check now</button></div>`;
     } else html = '';
     if (html === lastBannerHtml) return;
     lastBannerHtml = html;
@@ -595,6 +611,7 @@ import {
   function openSheet(kind) {
     focusBeforeSheet = root.activeElement;
     state.sheet = kind; ref('sheetWrap').hidden = false; renderSheet();
+    for (const el of root.querySelectorAll('.top, .scroll')) el.inert = true;
     if (kind !== 'stores') {
       const first = ref('sheet').querySelector('button, a[href]');
       if (first) setTimeout(() => first.focus({ preventScroll: true }), 50);
@@ -611,6 +628,7 @@ import {
   }
   function closeSheet() {
     state.sheet = null; ref('sheetWrap').hidden = true;
+    for (const el of root.querySelectorAll('.top, .scroll')) el.inert = false;
     const back = focusBeforeSheet && root.contains(focusBeforeSheet) && focusBeforeSheet.offsetParent ? focusBeforeSheet : app;
     back.focus({ preventScroll: true });
   }
@@ -622,8 +640,8 @@ import {
     const typed = oldInput ? oldInput.value : null, typing = oldInput && root.activeElement === oldInput;
     if (state.sheet === 'stores') {
       const rows = storeSearch.results.map((s) => {
-        const why = s.closed ? 'Temporarily closed' : !s.pickup ? 'No in-store pickup' : null;
-        const today = why || todaysHours(s.hours);
+        const why = s.closed ? 'Temporarily closed' : null;
+        const today = why || (!s.pickup ? 'Walk-in only — no online pickup' : todaysHours(s.hours));
         return `<button class="store${state.store?.id === s.id ? ' selected' : ''}" data-act="pick-store" data-id="${esc(s.id)}"${why ? ' aria-disabled="true"' : ''}>
           <span class="store-main"><b>${esc(s.name)}${state.store?.id === s.id ? '<span aria-hidden="true"> ✓</span><span class="vh">, selected</span>' : ''}</b>
             <span>${esc([s.a1, s.a2].filter(Boolean).join(', '))}</span><span>${esc(`${s.city}, ${s.state} ${s.zip}`)}</span>
@@ -666,10 +684,14 @@ import {
     const v = el.dataset.v;
     switch (el.dataset.act) {
       case 'close': return closeApp();
-      case 'refresh':
+      case 'refresh': {
+        const fromPanel = !!el.closest('[data-ref="status"]');
         await loadDeals();
         if (!state.error && state.items.length) toast('Deals updated');
+        // Still nothing: stay on Try again so another Enter tries again.
+        else if (fromPanel) { const again = ref('status').querySelector('[data-act="refresh"]'); if (again) again.focus({ preventScroll: true }); }
         return;
+      }
       case 'retry-stock':
         await loadStock({ onlyMissing: hasStock() && !!state.stock.partial && Date.now() - state.stock.at < 6 * 3600e3 });
         if (!state.stockError && state.store) toast(`Shelf stock updated for ${state.store.name}`);
@@ -714,7 +736,7 @@ import {
       case 'pick-store': {
         const s = storeSearch.results.find((x) => x.id === el.dataset.id);
         if (!s) return;
-        if (s.closed || !s.pickup) return toast(s.closed ? `${s.name} is temporarily closed.` : `${s.name} doesn't offer pickup.`);
+        if (s.closed) return toast(`${s.name} is temporarily closed.`);
         closeSheet();
         update(() => { state.store = s; state.mode = 'pickup'; state.stock = null; rebuild(); });
         const row = root.querySelector('.store-row');
@@ -868,7 +890,11 @@ import {
       if (view && Date.now() - view.at < 30 * 60_000) { state.query = view.q || ''; ref('q').value = state.query; } else view = null;
     }
     if (wantOpen) openApp();
-    if (view && state.open && view.top) requestAnimationFrame(() => { ref('scroll').scrollTop = view.top; });
+    if (view && state.open) requestAnimationFrame(() => {
+      if (view.top) ref('scroll').scrollTop = view.top;
+      const card = view.card != null && [...root.querySelectorAll('[data-card]')].find((el) => el.dataset.card === view.card);
+      if (card) card.focus({ preventScroll: true });
+    });
     let reopen = null;
     try { reopen = sessionStorage.getItem('vsx.reopen'); sessionStorage.removeItem('vsx.reopen'); } catch { /* private mode */ }
     if (reopen === 'stores' && state.open) openSheet('stores');
@@ -898,6 +924,7 @@ import {
   });
   window.addEventListener('pagehide', () => {
     if (!state.open) return;
-    try { sessionStorage.setItem('vsx.view', JSON.stringify({ q: state.query, top: ref('scroll').scrollTop, at: Date.now() })); } catch { /* private mode */ }
+    const card = root.activeElement && root.activeElement.dataset ? root.activeElement.dataset.card : null;
+    try { sessionStorage.setItem('vsx.view', JSON.stringify({ q: state.query, top: ref('scroll').scrollTop, card, at: Date.now() })); } catch { /* private mode */ }
   });
 })();

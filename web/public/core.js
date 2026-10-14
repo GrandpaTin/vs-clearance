@@ -19,8 +19,12 @@ const pos = (v) => (typeof v === 'number' && v > 0 ? v : null);
 /** A shared row the page can show: an id, a link and a real price. */
 export function isUsableItem(o) {
   return !!o && typeof o === 'object' && (typeof o.id === 'string' || typeof o.id === 'number') && String(o.id) !== '' &&
-    typeof o.url === 'string' && Number.isFinite(Number(o.site)) && Number(o.site) > 0;
+    typeof o.url === 'string' && /^https:\/\//i.test(o.url) && Number.isFinite(Number(o.site)) && Number(o.site) > 0;
 }
+
+// Text fields from shared JSON: a string (or number) or nothing — never an object or array.
+const txt = (v) => (typeof v === 'string' || typeof v === 'number') ? String(v).trim() || null : null;
+const posNum = (v) => (Number(v) > 0 ? Number(v) : null);
 
 export function normalizeItem(o, stock) {
   const jda = o.jda || null;
@@ -28,21 +32,21 @@ export function normalizeItem(o, stock) {
   return {
     id: String(o.id),
     jda,
-    brand: String(o.brand || '').trim(),
-    title: String(o.title || o.id).trim(),
+    brand: txt(o.brand) || '',
+    title: txt(o.title) || String(o.id),
     url: o.url,
-    img: o.img || null,
+    img: typeof o.img === 'string' && /^https:\/\//i.test(o.img) ? o.img : null,
     list: Math.max(Number(o.list) || 0, Number(o.site)),
     site: Number(o.site),
     adp: pos(o.adp),
-    cart: o.cart > 0 ? o.cart : null,
-    servings: o.servings > 0 ? o.servings : null,
-    servingSize: o.servingSize || null,
-    form: o.form || null,
-    category: o.category || null,
-    variants: o.variants || null,
+    cart: posNum(o.cart),
+    servings: posNum(o.servings),
+    servingSize: txt(o.servingSize),
+    form: txt(o.form),
+    category: txt(o.category),
+    variants: txt(o.variants),
     rating: pos(o.rating),
-    reviews: o.reviews > 0 ? o.reviews : 0,
+    reviews: posNum(o.reviews) || 0,
     oos: !!o.oos,
     pickup: o.pickup !== false,
     qty
@@ -82,16 +86,24 @@ const SHORT = [
   ['Vegetarian Capsules', 'veg caps'], ['Veggie Capsules', 'veg caps'], ['Veggie Caps', 'veg caps'],
   ['Vegan Capsules', 'vegan caps'], ['Liquid Capsules', 'liquid caps'], ['Capsules', 'caps'],
   ['Tablet(s)', 'tabs'], ['Tablets', 'tabs'], ['Softgels', 'softgels'], ['Servings', 'servings'],
-  ['Gummies', 'gummies'], ['Lozenges', 'lozenges'], ['Packets', 'packets'], ['Bars', 'bars']
+  ['Gummies', 'gummies'], ['Lozenges', 'lozenges'], ['Single Serving Packets', 'packets'], ['Single Serving Packet', 'packet'],
+  ['Single Serve Packets', 'packets'], ['Stick Packs', 'stick packs'], ['Packets', 'packets'], ['Bars', 'bars']
 ];
+const SHORT_RE = SHORT.map(([a, b]) => [new RegExp(a.replace(/[()]/g, '\\$&'), 'gi'), b]);
 export function shortSize(size) {
   let out = size;
-  for (const [a, b] of SHORT) out = out.replace(new RegExp(a.replace(/[()]/g, '\\$&'), 'gi'), b);
+  for (const [re, b] of SHORT_RE) out = out.replace(re, b);
   return out;
 }
 
 /** Fact pills: pack size first (survives title truncation), servings only when they add information. */
+const factsMemo = new WeakMap();
 export function facts(d) {
+  let f = factsMemo.get(d);
+  if (!f) { f = factsOf(d); factsMemo.set(d, f); }
+  return f;
+}
+function factsOf(d) {
   const size = sizeLabel(d.title);
   const out = [];
   out.push(size ? shortSize(size) : d.form);
@@ -248,8 +260,14 @@ export function inCategory(category, family) {
 
 /** [family, count] for every category, folding sub-categories into a family that also exists. */
 /** "Herbs A-E" -> "Herbs", "Other Protein" -> "Protein", "Herbs & Natural Remedies" -> "Herbs". */
+const cleanMemo = new Map();
 export function cleanCategory(c) {
   if (!c) return c;
+  let hit = cleanMemo.get(c);
+  if (hit === undefined) { hit = cleanCategoryOf(c); cleanMemo.set(c, hit); }
+  return hit;
+}
+function cleanCategoryOf(c) {
   let t = c.trim().replace(/\s+[A-Z]\s*-\s*[A-Z]$/, '').replace(/^Other\s+/i, '');
   if (/^herbs?\b/i.test(t)) t = 'Herbs';
   return t || c;
@@ -364,6 +382,7 @@ export function isListingDespiteStatus(status, data) {
 }
 
 export function relativeTime(ms, now = Date.now()) {
+  if (ms == null || !Number.isFinite(Number(ms)) || Number(ms) <= 0) return 'recently';
   const s = Math.max(0, Math.round((now - ms) / 1000));
   if (s < 60) return 'just now';
   const m = Math.round(s / 60);

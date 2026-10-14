@@ -142,6 +142,9 @@ async function load({ manual = false } = {}) {
 
 function acceptSnapshot(snap) {
   if (!snap || !Array.isArray(snap.items)) throw new Error('not a deals list');
+  const when = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : typeof v === 'string' ? Date.parse(v) || null : null);
+  snap.publishedAt = when(snap.publishedAt);
+  snap.savedAt = when(snap.savedAt);
   const stock = snap.stockStoreId && snap.store && snap.stockStoreId === snap.store.id ? snap.stock : null;
   // One malformed row (no id, link or price) is skipped rather than taking the whole list down.
   const items = snap.items.filter(isUsableItem).map((o) => normalizeItem(o, stock));
@@ -164,7 +167,8 @@ function acceptSnapshot(snap) {
   if (!state.changes.newIds.size && !state.changes.drops.size) state.onlyChanges = false;
 }
 
-const oldList = () => !!state.snapshot && Date.now() - (state.snapshot.savedAt || state.snapshot.publishedAt) > 36 * 3600e3;
+const oldList = () => !!state.snapshot && !!(state.snapshot.savedAt || state.snapshot.publishedAt) &&
+  Date.now() - (state.snapshot.savedAt || state.snapshot.publishedAt) > 36 * 3600e3;
 const hasStock = () => !!(state.snapshot?.store && state.snapshot.stockStoreId === state.snapshot.store.id && state.snapshot.stock);
 const changeIds = () => new Set([...state.changes.newIds, ...state.changes.drops.keys()]);
 
@@ -207,7 +211,17 @@ for (const id of ['floor-chips', 'cat-chips']) $(id).addEventListener('scroll', 
 
 function render() {
   const key = focusKey();
-  renderBody();
+  try {
+    renderBody();
+  } catch (err) {
+    // Something in the list this page can't handle: say so rather than leave placeholders spinning.
+    console.error(err);
+    $('list').replaceChildren();
+    const box = $('status');
+    box.hidden = false;
+    box.innerHTML = statusHtml('⚠️', 'Couldn’t show this list', 'The shared list has something this page can’t read. Try again in a minute.', [['Try again', 'retry', true]]);
+    return;
+  }
   // After layout settles: measuring the chip rows right after swapping in hundreds of cards would
   // force the whole list to lay out on the spot.
   if (state.snapshot) requestAnimationFrame(revealActiveChips);
@@ -268,6 +282,17 @@ function renderHeader() {
 
 let cardCache = new Map();
 
+// A card's markup depends only on the item, the mode, the store and its new / price-drop marks.
+const cardMemo = new WeakMap();
+function cachedCardHtml(d) {
+  const key = `${state.mode}|${hasStock() ? state.snapshot.store.id : ''}|${state.changes.newIds.has(d.id)}|${state.changes.drops.get(d.id) ?? ''}`;
+  const hit = cardMemo.get(d);
+  if (hit && hit.key === key) return hit.html;
+  const html = cardHtml(d);
+  cardMemo.set(d, { key, html });
+  return html;
+}
+
 let renderToken = 0;
 function renderBody() {
   renderToken++; // a newer render cancels cards still being added from the last one
@@ -325,7 +350,7 @@ function renderBody() {
   const next = new Map([...cardCache].filter(([id]) => ids.has(id)));
   const tpl = document.createElement('template');
   const build = (d) => {
-    const html = cardHtml(d);
+    const html = cachedCardHtml(d);
     const old = next.get(d.id);
     if (old && old.html === html) return old.el;
     tpl.innerHTML = html.trim();
@@ -405,7 +430,18 @@ function renderControls() {
   const catBase = { ...base, minDiscount: state.floor, category: null, unsorted: true };
   const inView = applyFilters(state.items, catBase);
   const all = categoryCounts(state.items);
-  const countIn = (c) => inView.filter((d) => inCategory(d.category, c)).length;
+  // One pass over the list, then each family sums the categories that fold into it.
+  const perCat = new Map();
+  for (const d of inView) { const k = d.category; perCat.set(k, (perCat.get(k) || 0) + 1); }
+  const countMemo = new Map();
+  const countIn = (c) => {
+    if (!countMemo.has(c)) {
+      let n = 0;
+      for (const [k, v] of perCat) if (k && inCategory(k, c)) n += v;
+      countMemo.set(c, n);
+    }
+    return countMemo.get(c);
+  };
   // Families with nothing under the current filters (e.g. none on this store's shelf) are left out.
   const counted = all.map((e, i) => [e[0], countIn(e[0]), i]);
   const live = counted.filter((e) => e[0] === state.category || e[1] > 0)
