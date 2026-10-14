@@ -49,6 +49,7 @@ import androidx.compose.ui.unit.dp
 import com.dealfilter.vitaminshoppe.data.remote.WebPublisher
 import com.dealfilter.vitaminshoppe.data.remote.WebShareState
 import com.dealfilter.vitaminshoppe.ui.viewmodel.ago
+import com.dealfilter.vitaminshoppe.ui.screens.rememberNowMillis
 
 /** What the sheet says about sharing right now, in plain words. */
 fun shareStatusText(share: WebShareState, now: Long): String = when (share.status) {
@@ -73,6 +74,7 @@ fun WebShareSheet(
     onSave: (gitHubRepo: String, gitHubToken: String, serverUrl: String, serverToken: String, enabled: Boolean) -> Unit,
     onToggle: (Boolean) -> Unit,
     onPublishNow: () -> Unit,
+    onSaveAndPublish: (gitHubRepo: String, gitHubToken: String, serverUrl: String, serverToken: String, enabled: Boolean) -> Unit,
     onDismiss: () -> Unit,
     onNotSaved: (String) -> Unit = {}
 ) {
@@ -86,8 +88,8 @@ fun WebShareSheet(
     val dirty = WebPublisher.normalizeUrl(repo) != share.gitHubRepo || repoToken.trim() != share.gitHubToken ||
         WebPublisher.normalizeUrl(server) != share.serverUrl || serverToken.trim() != share.serverToken
     val repoInvalid = repo.isNotBlank() && WebPublisher.gitHubRepo(repo) == null
-    val canPublish = (repo.isNotBlank() && !repoInvalid && repoToken.isNotBlank()) || (server.isNotBlank() && serverToken.isNotBlank())
-    val now = System.currentTimeMillis()
+    val canPublish = !repoInvalid && ((repo.isNotBlank() && repoToken.isNotBlank()) || (server.isNotBlank() && serverToken.isNotBlank()))
+    val now = rememberNowMillis()
 
     ModalBottomSheet(
         onDismissRequest = {
@@ -181,8 +183,8 @@ fun WebShareSheet(
                 ) { Text("Save") }
                 Button(
                     onClick = {
-                        if (dirty) onSave(repo, repoToken, server, serverToken, share.enabled || !share.isConfigured)
-                        onPublishNow()
+                        if (dirty) onSaveAndPublish(repo, repoToken, server, serverToken, share.enabled || !share.isConfigured)
+                        else onPublishNow()
                     },
                     enabled = canPublish && !share.isPublishing,
                     modifier = Modifier.weight(1f).heightIn(min = 48.dp)

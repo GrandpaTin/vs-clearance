@@ -55,12 +55,19 @@ fun UpdateDialog(
                 }
                 when {
                     downloading -> {
-                        val pct = ((update.progress ?: 0f) * 100).toInt()
-                        Text("Downloading… $pct%", style = MaterialTheme.typography.bodyMedium)
-                        LinearProgressIndicator(
-                            progress = { update.progress ?: 0f },
-                            modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Downloading update, $pct percent" }
-                        )
+                        val p = update.progress ?: 0f
+                        if (p < 0f) {
+                            // Size unknown: no percentage to show.
+                            Text("Downloading…", style = MaterialTheme.typography.bodyMedium)
+                            LinearProgressIndicator(modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Downloading update" })
+                        } else {
+                            val pct = (p * 100).toInt()
+                            Text("Downloading… $pct%", style = MaterialTheme.typography.bodyMedium)
+                            LinearProgressIndicator(
+                                progress = { p },
+                                modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Downloading update, $pct percent" }
+                            )
+                        }
                     }
                     update.needsInstallPermission -> Text(
                         "Android asks once before an app can install its own updates. Tap Open settings, turn on " +

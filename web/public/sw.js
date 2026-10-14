@@ -8,17 +8,15 @@ function saveIfList(res) {
   return res.clone().json().then((j) => {
     if (!j || !Array.isArray(j.items)) return;
     const headers = new Headers(res.headers);
-    return caches.open(VERSION).then((c) => c.put('api/snapshot', new Response(JSON.stringify(j), { status: 200, headers })));
+    return caches.open(LIST_CACHE).then((c) => c.put('api/snapshot', new Response(JSON.stringify(j), { status: 200, headers })));
   }).catch(() => {});
 }
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: 'reload' })))
-    // Best effort: a missing or failed list mustn't stop the worker installing.
-    .then(() => Promise.race([
-      fetch('api/snapshot', { cache: 'no-cache' }).then((r) => (r.ok ? saveIfList(r) : null)).catch(() => null),
-      new Promise((resolve) => setTimeout(resolve, 8000)) // a hung download mustn't hold up the offline shell
-    ])))
+    // (No list download here: the page saves the list it already fetched, so a first visit
+    // on a weak signal downloads it once.)
+    )
     .then(() => self.skipWaiting()));
 });
 
@@ -29,11 +27,13 @@ self.addEventListener('message', (e) => {
 
 self.addEventListener('activate', (e) => {
   e.waitUntil(caches.keys()
-    .then((keys) => Promise.all(keys.filter((k) => k !== VERSION && k !== IMG_CACHE).map((k) => caches.delete(k))))
+    .then((keys) => Promise.all(keys.filter((k) => k !== VERSION && k !== IMG_CACHE && k !== LIST_CACHE).map((k) => caches.delete(k))))
     .then(() => self.clients.claim()));
 });
 
 const IMG_CACHE = 'vs-img';
+/** The saved deals list lives in its own cache (shared with the page), kept across app versions. */
+const LIST_CACHE = 'vs-list';
 const IMG_MAX = 250;
 /** Keeps the photo cache to the newest IMG_MAX pictures. */
 function trimImages(c) {

@@ -40,8 +40,12 @@
   // A script file that fails to load fires "error" on its element; that doesn't bubble, so catch it here.
   window.addEventListener('error', function (e) {
     var t = e.target;
-    if (t && t.tagName === 'SCRIPT') whenReady(function () { show(true); });
+    if (t && t.tagName === 'SCRIPT') return whenReady(function () { show(true); });
+    // A script that loaded but can't run (a syntax this browser doesn't know, a corrupted copy).
+    if (!booted() && e.filename && /\/(app|core)\.js/.test(e.filename)) whenReady(function () { show(true); });
   }, true);
+  // Browsers that can't run modules at all never start the app: say so straight away.
+  window.vsBootBroken = function () { whenReady(function () { show(true); }); };
   // Backstop: usually just a slow connection (the app marks itself booted when it starts).
   setTimeout(function () { whenReady(function () { show(false); }); }, 12000);
 })();

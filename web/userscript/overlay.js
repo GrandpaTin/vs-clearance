@@ -139,7 +139,7 @@ import {
       put('marks', { newIds: [...state.changes.newIds], drops: Object.fromEntries(state.changes.drops) });
       errorRetries = 0;
       const stockWaiting = state.stockError && !state.stockBlocked && Date.now() < nextStockRetry;
-      if (state.store && !stockWaiting) loadStock({ onlyMissing: !stockIsDue() }); else publish();
+      if (state.store && !stockWaiting) loadStock({ onlyMissing: gapsOnly() || !stockIsDue() }); else publish();
     } catch (e) {
       state.error = e.message; state.blocked = e instanceof Blocked; state.siteChanged = e instanceof SiteChanged;
       if (!state.blocked && !state.siteChanged) nextErrorRetry = Date.now() + Math.min(15 * 2 ** errorRetries++, 120) * 60_000;
@@ -208,7 +208,7 @@ import {
         state.stockError = state.stockBlocked
           ? `Vitamin Shoppe wants to confirm a person is browsing before showing stock at ${store.name}. Reload the page, complete any check, and Deals reopens.`
           : (keep ? `Couldn't check the ${missing} new item${missing === 1 ? '' : 's'} at ${store.name}. `
-            : reached ? `Couldn't check ${missing} of ${total} items at ${store.name}. ` : `Couldn't re-check shelf stock at ${store.name}. `) +
+            : reached ? `Couldn't check ${missing} of ${total} items at ${store.name}. ` : `Couldn't ${prev ? 're-check' : 'check'} shelf stock at ${store.name}. `) +
             `${e.message.replace(/\.?$/, '.')}`;
         state.stockAdvice = connection ? 'Check your connection and try again.' : 'Retry, or it will try again later.';
       }
@@ -265,6 +265,7 @@ import {
       return;
     }
     storeSearch.searching = true; storeSearch.message = null; storeSearch.blocked = false; renderSheet();
+    ref('sheetLive').textContent = '';
     put('storeQuery', q);
     try {
       const { stores, status } = parseStores(await getJson(storeSearchUrl(q)));
@@ -341,14 +342,16 @@ import {
     render();
     // A refusal from before (the user may just have completed the site's check) is retried on open.
     if (state.blocked || listIsOld()) loadDeals();
-    else if (state.stockBlocked || stockIsDue()) loadStock({ onlyMissing: !state.stockBlocked && hasStock() && !!state.stock.partial });
+    else if (state.stockBlocked || stockIsDue()) loadStock({ onlyMissing: !state.stockBlocked && gapsOnly() });
     if (storeSearch.blocked && state.sheet === 'stores') searchStores();
     // Esc works straight away (focus starts on the page underneath).
     app.focus({ preventScroll: true });
   }
   /** Saved stock is partial or lacks some current items (so "only missing" has something to ask for). */
   function stockHasGaps() { return !!state.stock.partial || state.raw.some((o) => o.jda && !(o.jda in state.stock.map)); }
-  function stockIsDue() { return !!state.store && (!hasStock() || !!state.stock.partial || Date.now() - (state.stock.at || 0) > 6 * 3600e3); }
+  function stockIsDue() { return !!state.store && (!hasStock() || stockHasGaps() || Date.now() - (state.stock.at || 0) > 6 * 3600e3); }
+  /** Fresh stock with gaps: ask only for what's missing. */
+  function gapsOnly() { return hasStock() && stockHasGaps() && Date.now() - (state.stock.at || 0) < 6 * 3600e3; }
   // One rule everywhere: a list older than 10 minutes refreshes on open, on reconnect and on return.
   function listIsOld() { return !state.savedAt || Date.now() - state.savedAt > 10 * 60_000; }
   window.addEventListener('online', () => {
@@ -367,8 +370,8 @@ import {
     if (state.error) { if (!state.blocked && !state.siteChanged && now >= nextErrorRetry) return loadDeals(); }
     else if (!state.blocked && listIsOld()) return loadDeals();
     if (state.stockError) {
-      if (!state.stockBlocked && now >= nextStockRetry) return loadStock({ onlyMissing: hasStock() && now - state.stock.at < 6 * 3600e3 && stockHasGaps() });
-    } else if (stockIsDue()) return loadStock({ onlyMissing: hasStock() && !!state.stock.partial });
+      if (!state.stockBlocked && now >= nextStockRetry) return loadStock({ onlyMissing: gapsOnly() });
+    } else if (stockIsDue()) return loadStock({ onlyMissing: gapsOnly() });
     // Only the time-based text: rebuilding the list would knock keyboard focus and scroll about.
     if (state.savedAt) {
       const n = changeIds().size;
@@ -493,7 +496,7 @@ import {
     const total = state.items.length;
     const said = `Showing ${deals.length} of ${total} deals`;
     clearTimeout(render.say);
-    render.say = setTimeout(() => { if (ref('live').textContent !== said) ref('live').textContent = said; }, 700);
+    render.say = setTimeout(() => { if (render.lastSaid !== said) { render.lastSaid = said; ref('live').textContent = said; } }, 700);
     setHtml(ref('summary'), `<span class="count" aria-hidden="true">${deals.length === total ? `${total} deals` : `${deals.length} of ${total}`}</span>
       ${deals.length ? `<button class="tonal-btn" data-act="ai"><span aria-hidden="true">🧠</span> Ask AI (${Math.min(deals.length, AI_MAX_ITEMS)})</button>` : ''}
       <label class="sort"><span class="vh">Sort by</span><span aria-hidden="true">⇅</span><select data-ref="sort">${SORTS.map((o) => `<option value="${o.id}"${o.id === state.sort ? ' selected' : ''}>${esc(o.short)}</option>`).join('')}</select></label>`);
@@ -714,18 +717,20 @@ import {
       case 'close': return closeApp();
       case 'refresh': {
         const fromPanel = !!el.closest('[data-ref="status"]');
+        const fromBanner = !!el.closest('[data-ref="banner"]');
         await loadDeals();
         if (!state.error && state.items.length) toast('Deals updated');
         // Still nothing: stay on Try again so another Enter tries again.
         else if (state.error) {
-          ref('live').textContent = `${state.items.length ? "Couldn't refresh" : "Still couldn't load deals"}. ${state.error}`.trim();
-          const again = fromPanel && ref('status').querySelector('[data-act="refresh"]');
+          // With a list on screen the banner says it; with none, say it here.
+          if (!state.items.length) ref('live').textContent = `Still couldn't load deals. ${state.error}`.trim();
+          const again = (fromPanel && ref('status').querySelector('[data-act="refresh"]')) || (fromBanner && ref('banner').querySelector('[data-act="refresh"]'));
           if (again) again.focus({ preventScroll: true });
         }
         return;
       }
       case 'retry-stock':
-        await loadStock({ onlyMissing: hasStock() && !!state.stock.partial && Date.now() - state.stock.at < 6 * 3600e3 });
+        await loadStock({ onlyMissing: gapsOnly() });
         if (!state.stockError && state.store) toast(`Shelf stock updated for ${state.store.name}`);
         return;
       case 'reload-page':
@@ -770,7 +775,8 @@ import {
         if (!s) return;
         if (s.closed) return toast(`${s.name} is temporarily closed.`);
         closeSheet();
-        update(() => { state.store = s; state.mode = 'pickup'; state.stock = null; rebuild(); });
+        stockRetries = 0; nextStockRetry = 0;
+        update(() => { state.store = s; state.mode = 'pickup'; state.stock = null; state.stockError = null; state.stockBlocked = false; state.stockAdvice = null; rebuild(); });
         const row = root.querySelector('.store-row');
         if (row) row.focus({ preventScroll: true });
         await loadStock();
@@ -784,6 +790,7 @@ import {
       case 'clear-store':
         closeSheet();
         stockRun++; // a check still running for the old store must not report back
+        stockRetries = 0; nextStockRetry = 0;
         return update(() => { state.store = null; state.stock = null; state.mode = 'ship'; state.stockError = null; state.stockBlocked = false; state.stockLoading = false; put('stock', null); rebuild(); });
       case 'copy-prompt':
         try { await navigator.clipboard.writeText(promptText); toast('Prompt copied — paste it into your AI chat'); }
@@ -866,10 +873,12 @@ import {
 
   /** #vsdeals-share=<base64url {"url","token"}> from the owner's /setup page pairs this browser. */
   function takePairing() {
-    const m = /^#vsdeals-share=([A-Za-z0-9_-]+)$/.exec(location.hash);
+    const m = /^#vsdeals-share=(.*)$/.exec(location.hash);
     if (!m) return false;
     try {
-      const json = JSON.parse(atob(m[1].replace(/-/g, '+').replace(/_/g, '/')));
+      // Chat apps sometimes add a trailing "." or ")" to a link: keep only the base64url part.
+      const code = (/^[A-Za-z0-9_-]+/.exec(decodeURIComponent(m[1])) || [''])[0];
+      const json = JSON.parse(atob(code.replace(/-/g, '+').replace(/_/g, '/')));
       if (!/^https:\/\//.test(json.url) || typeof json.token !== 'string' || json.token.length < 16) throw new Error('bad');
       state.share = { url: json.url, token: json.token };
       put('share', state.share);

@@ -104,12 +104,17 @@ async function load({ manual = false } = {}) {
       if (manual) toast(before === cached ? said[0] : said[1]);
       return;
     }
-    let snap;
+    let snap, raw;
     try {
-      snap = await res.json();
+      raw = await res.text();
+      snap = JSON.parse(raw);
       acceptSnapshot(snap);
     } catch {
       throw Object.assign(new Error('unreadable'), { unreadable: true });
+    }
+    // Keep a good list for offline use (the service worker doesn't see a first visit's download).
+    if (!fromCache && window.caches) {
+      caches.open('vs-list').then((c) => c.put('api/snapshot', new Response(raw, { headers: { 'Content-Type': 'application/json' } }))).catch(() => {});
     }
     // Only now: an ETag for a list that couldn't be read would make every retry a "nothing new" 304.
     if (!fromCache) state.etag = res.headers.get('ETag');
@@ -430,10 +435,13 @@ function renderControls() {
   let prev = -1;
   // Nothing matches at all: the empty state offers the fixes, so a row of zeros would only add noise.
   const counting = { ...base, unsorted: true };
-  const none = applyFilters(state.items, { ...counting, minDiscount: 0 }).length === 0;
-  const nActive = state.floor ? applyFilters(state.items, { ...counting, minDiscount: state.floor }).length : -1;
+  // One filter pass; each discount level is a count over it.
+  const anyDiscount = applyFilters(state.items, { ...counting, minDiscount: 0 });
+  const atLeast = (f) => (f ? anyDiscount.filter((d) => discount(d) >= f).length : anyDiscount.length);
+  const none = anyDiscount.length === 0;
+  const nActive = state.floor ? atLeast(state.floor) : -1;
   for (const f of none ? [] : FLOORS) {
-    const n = applyFilters(state.items, { ...counting, minDiscount: f }).length;
+    const n = atLeast(f);
     // "Any discount" that would show exactly what the active floor shows is just noise (Clear resets it).
     if (!f && state.floor && n === nActive) { prev = n; continue; }
     if (f && (n === 0 || n > prev * 0.97) && state.floor !== f) continue;

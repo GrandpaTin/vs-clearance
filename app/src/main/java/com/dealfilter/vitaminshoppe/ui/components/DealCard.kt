@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -222,7 +223,7 @@ fun DealCard(
 
                 // At large font the stock line needs the full width, so actions drop to the next row.
                 if (largeFont) Box(Modifier.padding(end = 8.dp)) { AvailabilityLine(deal, store, isStockLoading, shipMode) }
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.height(40.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.heightIn(min = 40.dp)) {
                     Column(Modifier.weight(1f)) {
                         if (!largeFont) AvailabilityLine(deal, store, isStockLoading, shipMode)
                     }

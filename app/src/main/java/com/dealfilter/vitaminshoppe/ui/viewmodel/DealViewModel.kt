@@ -110,6 +110,7 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
     private var verificationDeclinedAt = 0L
 
     private val connectivity = application.getSystemService(ConnectivityManager::class.java)
+
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
             viewModelScope.launch { onNetworkAvailable() }
@@ -288,7 +289,10 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
     private fun refreshInternal(auto: Boolean) {
         if (loadJob?.isActive == true) return
         loadJob = viewModelScope.launch {
-            _uiState.update {
+            // An automatic try while offline keeps the offline banner up (no "Refreshing…" flash, no
+            // TalkBack re-announcement); the screen only changes if it gets through.
+            if (auto && _uiState.value.loadErrorIsOffline && _uiState.value.hasData) Unit
+            else _uiState.update {
                 it.copy(
                     status = if (it.hasData) LoadStatus.REFRESHING else LoadStatus.LOADING,
                     loadError = null,
@@ -327,6 +331,8 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
                         lastUpdatedMillis = now,
                         isShowingSavedData = false,
                         needsVerification = false,
+                        loadError = null,
+                        loadErrorIsOffline = false,
                         stockError = null
                     ).withDerived()
                 }
@@ -487,6 +493,12 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
 
     fun closeWebShare() = _uiState.update { it.copy(isWebShareOpen = false) }
 
+    /** Save, and publish once with the new settings (the sheet's "Publish now"). */
+    fun saveAndPublish(gitHubRepo: String, gitHubToken: String, serverUrl: String, serverToken: String, enabled: Boolean) {
+        publisher.configure(gitHubRepo, gitHubToken, serverUrl, serverToken, enabled)
+        publishNow()
+    }
+
     fun saveWebShare(gitHubRepo: String, gitHubToken: String, serverUrl: String, serverToken: String, enabled: Boolean) {
         val before = publisher.state.value
         publisher.configure(gitHubRepo, gitHubToken, serverUrl, serverToken, enabled)
@@ -529,8 +541,10 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
             showMessage(
                 when {
                     error == WebPublisher.SUPERSEDED -> error
-                    publisher.state.value.pending -> "Saved for later — " + (publisher.state.value.pendingReason ?: "it will sync when online").replaceFirstChar { it.lowercase() }
+                    error != null && publisher.state.value.pending -> "Saved for later — " + (publisher.state.value.pendingReason ?: "it will sync when online").replaceFirstChar { it.lowercase() }
                     error != null -> error
+                    publisher.state.value.pending -> "Published — " + (publisher.state.value.pendingReason ?: "the site will update on the next sync")
+                        .removePrefix("Saved; ").replaceFirstChar { it.lowercase() }
                     publisher.state.value.isGitHub -> "Published ${s.allDeals.size} deals — live on the site in about a minute"
                     else -> "Published ${s.allDeals.size} deals to the web app"
                 }

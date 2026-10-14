@@ -38,7 +38,9 @@ fun openProductPage(context: Context, url: String): Boolean {
 
 fun shareDeal(context: Context, deal: DealItem): Boolean {
     val price = if (deal.hasCartOnlyPrice) "≈${deal.formattedBestPrice} in cart" else deal.formattedBestPrice
-    val text = "${deal.brand} — ${deal.title}\n$price (was ${deal.formattedListPrice}, ${deal.discountPercent}% off) at The Vitamin Shoppe\n${deal.productUrl}"
+    val name = if (deal.brand.isBlank()) deal.title else "${deal.brand} — ${deal.title}"
+    val was = if (deal.discountPercent > 0) " (was ${deal.formattedListPrice}, ${deal.discountPercent}% off)" else ""
+    val text = "$name\n$price$was at The Vitamin Shoppe\n${deal.productUrl}"
     val send = Intent(Intent.ACTION_SEND).apply {
         type = "text/plain"
         putExtra(Intent.EXTRA_TEXT, text)

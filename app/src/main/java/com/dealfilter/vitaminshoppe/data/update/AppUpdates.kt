@@ -269,6 +269,7 @@ open class AppUpdater(
                             if (n < 0) break
                             out.write(buf, 0, n)
                             done += n
+                            if (total <= 0 && done == n.toLong()) _state.update { it.copy(progress = -1f) } // size unknown
                             if (total > 0) {
                                 val p = (done.toFloat() / total).coerceIn(0f, 1f)
                                 if (p - lastShown >= 0.02f && coroutineContext.isActive) { lastShown = p; _state.update { it.copy(progress = p) } }

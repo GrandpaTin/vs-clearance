@@ -138,6 +138,7 @@ fun DealScreen(viewModel: DealViewModel, modifier: Modifier = Modifier) {
             onSave = viewModel::saveWebShare,
             onToggle = viewModel::setWebShareEnabled,
             onPublishNow = viewModel::publishNow,
+            onSaveAndPublish = viewModel::saveAndPublish,
             onDismiss = viewModel::closeWebShare,
             onNotSaved = viewModel::showMessage
         )
@@ -573,7 +574,7 @@ private fun NoMatches(state: DealUiState, viewModel: DealActions) {
 
 /** The current time, ticking every 30 s so "saved 5 minutes ago" text stays true. */
 @Composable
-private fun rememberNowMillis(): Long {
+internal fun rememberNowMillis(): Long {
     val now by produceState(System.currentTimeMillis()) {
         while (true) {
             delay(30_000)
@@ -593,7 +594,7 @@ private fun HeaderSubtitle(state: DealUiState, compact: Boolean) {
         state.status == LoadStatus.LOADING -> "Loading live prices…"
         state.status == LoadStatus.REFRESHING -> "Refreshing…"
         state.isShowingSavedData && updated != null -> "Saved $updated"
-        updated != null && state.changes.count > 0 -> "Updated $updated · ${state.changes.count} new or cheaper"
+        updated != null && changedInMode(state) > 0 -> "Updated $updated · ${changedInMode(state)} new or cheaper"
         updated != null -> "Updated $updated"
         else -> "Live from vitaminshoppe.com"
     }
@@ -704,7 +705,7 @@ private fun Banners(state: DealUiState, viewModel: DealActions) {
             Banner(
                 icon = Icons.Default.SystemUpdate,
                 text = "Downloading update ${release.versionName}",
-                detail = "${(downloading * 100).toInt()}% — keep using the app; it installs when ready",
+                detail = (if (downloading < 0f) "Downloading" else "${(downloading * 100).toInt()}%") + " — keep using the app; it installs when ready",
                 container = badges.skyBlueContainer,
                 content = badges.onSkyBlueContainer,
                 action = "Show",
