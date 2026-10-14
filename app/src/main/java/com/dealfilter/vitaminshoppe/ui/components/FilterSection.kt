@@ -266,7 +266,8 @@ fun SummaryRow(
     aiCount: Int,
     onAskAi: () -> Unit,
     largeFont: Boolean,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onShelf: Boolean = false
 ) {
     val askAi = @Composable { mod: Modifier ->
         FilledTonalButton(
@@ -286,6 +287,8 @@ fun SummaryRow(
             Text(
                 // Keep the noun when it fits; "142 of 375" alone stays on one line on narrow phones.
                 text = when {
+                    onShelf && shown == total -> "$total on the shelf"
+                    onShelf -> "$shown of $total on the shelf"
                     shown == total -> "$total deals"
                     "$shown$total".length <= 4 -> "$shown of $total deals"
                     else -> "$shown of $total"
@@ -297,7 +300,7 @@ fun SummaryRow(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier
                     .weight(1f)
-                    .semantics { contentDescription = "Showing $shown of $total deals" }
+                    .semantics { contentDescription = if (onShelf) "Showing $shown of $total deals on the shelf" else "Showing $shown of $total deals" }
             )
             if (aiCount > 0 && !largeFont) askAi(Modifier)
             SortMenu(sort, onSort)

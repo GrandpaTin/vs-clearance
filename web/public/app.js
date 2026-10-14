@@ -355,7 +355,8 @@ function renderBody() {
     return;
   }
 
-  renderControls();
+  if (!sortOnly) renderControls();
+  sortOnly = false;
   const deals = visible();
   const total = state.mode === 'pickup'
     ? applyFilters(state.items, { mode: 'pickup' }).length
@@ -446,7 +447,7 @@ function renderControls() {
     if (!f && state.floor && n === nActive) { prev = n; continue; }
     if (f && (n === 0 || n > prev * 0.97) && state.floor !== f) continue;
     prev = n;
-    chips.push(`<button class="chip" data-act="floor" data-v="${f}" aria-pressed="${state.floor === f}">${f ? f + '%+ off' : 'Any discount'} <span class="n">${n}</span></button>`);
+    chips.push(`<button class="chip" data-act="floor" data-v="${f}" aria-pressed="${f > 0 && state.floor === f}">${f ? f + '%+ off' : 'Any discount'} <span class="n">${n}</span></button>`);
   }
   // On touch screens the row scrolls sideways: what's active (and Clear) leads so it's in view.
   const coarse = matchMedia('(pointer: coarse)').matches;
@@ -592,6 +593,9 @@ function toast(text) {
   toast.timer = setTimeout(() => { t.hidden = true; }, 2600);
 }
 
+/** Set by a sort change: the chip rows (and their counts) stay as they are. */
+let sortOnly = false;
+
 function update(change) {
   change();
   savePrefs();
@@ -714,7 +718,7 @@ $('fulfil').addEventListener('keydown', (e) => {
   update(() => { state.mode = mode; });
   document.querySelector(`#fulfil [data-mode="${mode}"]`).focus();
 });
-$('sort').addEventListener('change', (e) => update(() => { state.sort = e.target.value; }));
+$('sort').addEventListener('change', (e) => update(() => { state.sort = e.target.value; sortOnly = true; }));
 document.addEventListener('keydown', (e) => {
   if (e.target.id !== 'cat-more' || !['ArrowDown', 'ArrowUp'].includes(e.key) || e.altKey) return;
   e.preventDefault();

@@ -92,6 +92,12 @@ import {
     const m = get('marks', null);
     if (m) state.changes = prune({ newIds: new Set(m.newIds), drops: new Map(Object.entries(m.drops)) }, state.items);
   }
+  // Saved store / stock that don't have the expected shape are forgotten rather than trusted.
+  const plain = (o) => !!o && typeof o === 'object' && !Array.isArray(o);
+  if (!plain(state.store) || state.store.id == null) { state.store = null; put('store', null); }
+  if (!plain(state.stock) || !plain(state.stock.map) || !Number.isFinite(state.stock.at) || !state.store || state.stock.storeId !== state.store.id) {
+    state.stock = null; put('stock', null);
+  }
   try {
     rebuild();
     restoreMarks();
@@ -168,12 +174,18 @@ import {
 
   let stockRun = 0;
   /** Shelf stock for the chosen store. With onlyMissing, fresh stock is kept and only new items are asked about. */
-  async function loadStock({ onlyMissing = false } = {}) {
+  /** One shelf check per store at a time; a second request waits for (and shares) the one running. */
+  function loadStock(opts) {
+    const id = state.store ? state.store.id : null;
+    if (loadStock.p && loadStock.storeId === id) return loadStock.p;
+    loadStock.storeId = id;
+    const p = loadStockNow(opts).finally(() => { if (loadStock.p === p) loadStock.p = null; });
+    loadStock.p = p;
+    return p;
+  }
+  async function loadStockNow({ onlyMissing = false } = {}) {
     const store = state.store;
     if (!store || !state.raw.length) return;
-    // Already checking this store: a second run would only send every batch twice.
-    if (state.stockLoading && loadStock.storeId === store.id) return;
-    loadStock.storeId = store.id;
     const run = ++stockRun;
     let keep = onlyMissing && hasStock() ? state.stock : null;
     // Marked partial but every SKU has a value (a full re-check kept old counts, then failed): check all.
@@ -361,7 +373,8 @@ import {
     // Esc works straight away (focus starts on the page underneath). With no list and a problem shown,
     // start on its action (Try again / Reload page) instead.
     const action = !state.items.length && !state.loading && !ref('status').hidden && ref('status').querySelector('button, a.primary-btn');
-    (action || app).focus({ preventScroll: true });
+    const inSheet = state.sheet && ref('sheet').querySelector('h2[tabindex], button, input');
+    (inSheet || action || app).focus({ preventScroll: true });
   }
   /** Saved stock is partial or lacks some current items (so "only missing" has something to ask for). */
   function stockHasGaps() { return !!state.stock.partial || state.raw.some((o) => o.jda && !(o.jda in state.stock.map)); }
@@ -420,7 +433,7 @@ import {
 
   // ------------------------------------------------------------------- render
 
-  const hasStock = () => !!(state.store && state.stock?.storeId === state.store.id);
+  const hasStock = () => !!(state.store && state.store.id != null && state.stock && state.stock.map && state.stock.storeId === state.store.id);
   const changeIds = () => new Set([...state.changes.newIds, ...state.changes.drops.keys()]);
   const visible = () => applyFilters(state.items, {
     query: state.query, category: state.category, minDiscount: state.floor, inStockOnly: state.inStockOnly,
@@ -614,6 +627,7 @@ import {
       dot = 'good';
     }
     else if (hasStock() && d.qty != null) stock = d.oos ? 'Not in store · sold out online' : 'Not in store · ships';
+    else if (hasStock() && d.jda) stock = 'Shelf unknown · ' + (d.oos ? 'sold out online' : 'ships');
     else if (d.oos) { stock = 'Out of stock online'; dot = 'bad'; }
     else { stock = 'In stock online'; dot = 'good'; }
     const pills = facts(d).map((f) => `<span class="pill">${esc(f)}</span>`).join('') +
@@ -756,6 +770,7 @@ import {
       case 'retry-stock':
         await loadStock({ onlyMissing: gapsOnly() });
         if (!state.stockError && state.store) toast(`Shelf stock updated for ${state.store.name}`);
+        else if (state.stockError && state.store) toast(`Still couldn't check shelf stock at ${state.store.name}`);
         return;
       case 'reload-page':
         // Back where they were after the check: the store sheet reopens (and searches) if it was open.
@@ -911,7 +926,7 @@ import {
       return 'ok';
     } catch {
       history.replaceState(null, '', location.pathname + location.search); // never leave a token in the address bar
-      setTimeout(() => toast('That sharing link is invalid.'), 400);
+      setTimeout(() => toast('That sharing link is incomplete — open it again from your VS Clearance setup page.'), 400);
     }
     return 'invalid';
   }

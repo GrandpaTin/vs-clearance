@@ -165,8 +165,8 @@ main { max-width: 900px; margin: 0 auto; padding: 0 0 16px; }
 .thumb img { background: #fff; }
 .thumb img { width: 82px; height: 82px; object-fit: contain; padding: 4px; }
 .body { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
-.brandline { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding-right: 8px; }
-.brand { font-size: .75rem; letter-spacing: .06em; font-weight: 800; color: var(--navy); text-transform: uppercase; }
+.brandline { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding-right: 8px; min-width: 0; }
+.brand { min-width: 0; overflow-wrap: anywhere; font-size: .75rem; letter-spacing: .06em; font-weight: 800; color: var(--navy); text-transform: uppercase; }
 @media (prefers-color-scheme: dark) { .brand { color: var(--sky); } }
 .title {
   overflow-wrap: anywhere;

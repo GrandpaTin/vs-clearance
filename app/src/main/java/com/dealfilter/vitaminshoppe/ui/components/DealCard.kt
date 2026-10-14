@@ -311,7 +311,12 @@ private fun AvailabilityLine(deal: DealItem, store: StoreLocation?, isStockLoadi
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.semantics {
-                contentDescription = if (store != null) "$text at ${store.name}" else text
+                val shelfLine = text.contains("shelf") || text.startsWith("Not in store")
+                contentDescription = when {
+                    store == null -> text
+                    shelfLine -> "$text at ${store.name}"
+                    else -> text.replace("your store", store.name)
+                }
             }
         )
     }

@@ -83,6 +83,9 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
     /** The user asked to refresh while a background refresh was running. */
     private var userWaiting = false
 
+    /** Whether the running list load is a background (quiet) one. */
+    private var loadJobAuto = false
+
     /** The user's own "Check for updates" (one at a time). */
     private var manualUpdateCheck: Job? = null
     private var lastFailureAt = 0L
@@ -281,7 +284,7 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
     override fun refresh() {
         // A background refresh is already running: if it ends needing the site's check, run the user's own
         // refresh right after so the real check is shown (a quiet run never shows it).
-        if (loadJob?.isActive == true) {
+        if (loadJob?.isActive == true && loadJobAuto) {
             userWaiting = true
             // A quiet retry was running behind an unchanged banner: show it, so the tap visibly does something.
             if (_uiState.value.status == LoadStatus.IDLE) _uiState.update {
@@ -297,6 +300,7 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
 
     private fun refreshInternal(auto: Boolean) {
         if (loadJob?.isActive == true) return
+        loadJobAuto = auto
         loadJob = viewModelScope.launch {
             // An automatic try while offline keeps the offline banner up (no "Refreshing…" flash, no
             // TalkBack re-announcement); the screen only changes if it gets through.
@@ -365,8 +369,9 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
                 throw e
             } catch (e: FetchException.VerificationRequired) {
                 afterVerification["refresh"] = { refreshInternal(auto = false) }
-                if (auto && userWaiting) {
-                    userWaiting = false
+                val wanted = auto && userWaiting
+                userWaiting = false
+                if (wanted) {
                     val job = loadJob
                     viewModelScope.launch { job?.join(); refreshInternal(auto = false) }
                 }
@@ -380,6 +385,7 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
                 // Offline waits for the network to come back instead of a timer.
                 if (e !is FetchException.Offline) { lastFailureAt = System.currentTimeMillis(); scheduleAutoRetry() }
             } catch (e: Exception) {
+                userWaiting = false
                 _uiState.update { it.copy(status = LoadStatus.IDLE, loadError = "Something went wrong loading deals. Please try again.") }
                 lastFailureAt = System.currentTimeMillis()
                 scheduleAutoRetry()
@@ -497,7 +503,7 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
         // Only when sharing is on: with it off, opening the sheet must not publish anything.
         // ...and only when there's something unsent; just looking at the status shouldn't rebuild the site.
         val unsent = share.pending || share.lastError != null || (share.lastPublishedAt ?: 0L) < (_uiState.value.lastUpdatedMillis ?: 0L)
-        if (share.enabled && share.isConfigured && !share.isPublishing && unsent && _uiState.value.allDeals.isNotEmpty()) publishNow()
+        if (share.enabled && share.isConfigured && !share.isPublishing && unsent && _uiState.value.allDeals.isNotEmpty()) publishCurrent(announce = false)
     }
 
     fun closeWebShare() = _uiState.update { it.copy(isWebShareOpen = false) }
@@ -620,7 +626,12 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
         val base = copy(category = validCategory)
         return base.copy(
             visibleDeals = DealFilters.apply(allDeals, base.criteria),
-            categories = if (allDeals === categoriesFor) categories else DealFilters.topCategories(allDeals).also { categoriesFor = allDeals }
+            categories = run {
+                val onShelf = mode == FulfillmentMode.PICKUP && selectedStore != null && allDeals.any { it.storeQuantity != null }
+                if (allDeals === categoriesFor && onShelf == categoriesOnShelf) categories
+                else DealFilters.topCategories(if (onShelf) allDeals.filter { it.isInStockAtStore } else allDeals)
+                    .also { categoriesFor = allDeals; categoriesOnShelf = onShelf }
+            }
         )
     }
 
@@ -629,6 +640,7 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
 
     /** The list [DealUiState.categories] was computed from (they only change when the list does). */
     private var categoriesFor: List<DealItem>? = null
+    private var categoriesOnShelf = false
 
     private fun savePreferences() {
         if (!restored) return

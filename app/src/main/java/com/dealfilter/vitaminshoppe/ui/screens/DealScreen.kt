@@ -342,7 +342,12 @@ fun DealScreenContent(state: DealUiState, viewModel: DealActions, modifier: Modi
                 // no item has a count, so an empty list means "unknown", not "nothing there".
                 val stockUnknown = state.mode == FulfillmentMode.PICKUP && state.selectedStore != null &&
                     state.hasData && state.allDeals.none { it.storeQuantity != null }
-                val stockBlocked = state.mode == FulfillmentMode.PICKUP && state.visibleDeals.isEmpty() &&
+                // What's on this shelf before search / category / discount: the shelf states only apply when that's empty.
+                val shelf = if (state.mode == FulfillmentMode.PICKUP) DealFilters.apply(
+                    state.allDeals, state.criteria.copy(query = "", category = null, minDiscount = 0, onlyIds = null)
+                ) else null
+                val shelfEmpty = shelf?.isEmpty() == true
+                val stockBlocked = state.mode == FulfillmentMode.PICKUP && shelfEmpty &&
                     (state.isStockLoading || state.stockError != null || stockUnknown)
                 if (state.hasData && !stockBlocked) {
                     item(key = "discount") {
@@ -372,7 +377,8 @@ fun DealScreenContent(state: DealUiState, viewModel: DealActions, modifier: Modi
                         Surface(color = MaterialTheme.colorScheme.background) {
                             SummaryRow(
                                 shown = state.visibleDeals.size,
-                                total = state.allDeals.size,
+                                total = shelf?.size ?: state.allDeals.size,
+                                onShelf = shelf != null && state.selectedStore != null,
                                 sort = state.sort,
                                 onSort = viewModel::onSort,
                                 aiCount = state.promptItemCount,
@@ -413,7 +419,7 @@ fun DealScreenContent(state: DealUiState, viewModel: DealActions, modifier: Modi
                             primary = "Choose store" to viewModel::openStoreSheet
                         )
                     }
-                    state.mode == FulfillmentMode.PICKUP && state.isStockLoading && state.visibleDeals.isEmpty() -> item(key = "checking") {
+                    state.mode == FulfillmentMode.PICKUP && state.isStockLoading && shelfEmpty -> item(key = "checking") {
                         StatusMessage(
                             icon = Icons.Default.Storefront,
                             title = "Checking shelves…",
@@ -436,7 +442,7 @@ fun DealScreenContent(state: DealUiState, viewModel: DealActions, modifier: Modi
                             secondary = "Show ship-to-home" to { viewModel.onModeChange(FulfillmentMode.SHIP) }
                         )
                     }
-                    state.mode == FulfillmentMode.PICKUP && state.stockError != null && state.visibleDeals.isEmpty() -> item(key = "stockFailed") {
+                    state.mode == FulfillmentMode.PICKUP && state.stockError != null && shelfEmpty -> item(key = "stockFailed") {
                         StatusMessage(
                             icon = Icons.Default.ErrorOutline,
                             warning = true,
