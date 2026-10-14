@@ -47,6 +47,7 @@ h1 { font-size: 1.35rem; margin: 0; }
 .search input { flex: 1; min-width: 0; background: transparent; border: 0; color: #fff; font-size: 16px; padding: 12px 0; }
 .search input::placeholder { color: rgba(255,255,255,.7); }
 .search input:focus { outline: none; }
+.search:focus-within { outline: 3px solid var(--sky); outline-offset: 2px; }
 
 .scroll { flex: 1; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding-bottom: calc(32px + env(safe-area-inset-bottom)); }
 .scroll > * { max-width: 900px; margin-left: auto; margin-right: auto; }

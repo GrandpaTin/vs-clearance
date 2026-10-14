@@ -92,12 +92,23 @@ import {
     const m = get('marks', null);
     if (m) state.changes = prune({ newIds: new Set(m.newIds), drops: new Map(Object.entries(m.drops)) }, state.items);
   }
-  rebuild();
-  restoreMarks();
+  try {
+    rebuild();
+    restoreMarks();
+  } catch {
+    // A saved list from another version (or a damaged save): start fresh instead of failing to load.
+    state.raw = []; state.savedAt = null; state.items = [];
+    for (const k of ['cache', 'marks', 'baseline']) put(k, null);
+  }
 
   // ------------------------------------------------------------------- loading
 
-  async function loadDeals() {
+  /** One list load at a time; a second request shares (and waits for) the one already running. */
+  function loadDeals() {
+    if (!loadDeals.p) loadDeals.p = loadDealsNow().finally(() => { loadDeals.p = null; });
+    return loadDeals.p;
+  }
+  async function loadDealsNow() {
     if (state.loading) return;
     state.loading = true; state.error = null; state.blocked = false; state.partialNote = null; render();
     try {
@@ -160,6 +171,9 @@ import {
   async function loadStock({ onlyMissing = false } = {}) {
     const store = state.store;
     if (!store || !state.raw.length) return;
+    // Already checking this store: a second run would only send every batch twice.
+    if (state.stockLoading && loadStock.storeId === store.id) return;
+    loadStock.storeId = store.id;
     const run = ++stockRun;
     let keep = onlyMissing && hasStock() ? state.stock : null;
     // Marked partial but every SKU has a value (a full re-check kept old counts, then failed): check all.
@@ -344,8 +358,10 @@ import {
     if (state.blocked || listIsOld()) loadDeals();
     else if (state.stockBlocked || stockIsDue()) loadStock({ onlyMissing: !state.stockBlocked && gapsOnly() });
     if (storeSearch.blocked && state.sheet === 'stores') searchStores();
-    // Esc works straight away (focus starts on the page underneath).
-    app.focus({ preventScroll: true });
+    // Esc works straight away (focus starts on the page underneath). With no list and a problem shown,
+    // start on its action (Try again / Reload page) instead.
+    const action = !state.items.length && !state.loading && !ref('status').hidden && ref('status').querySelector('button, a.primary-btn');
+    (action || app).focus({ preventScroll: true });
   }
   /** Saved stock is partial or lacks some current items (so "only missing" has something to ask for). */
   function stockHasGaps() { return !!state.stock.partial || state.raw.some((o) => o.jda && !(o.jda in state.stock.map)); }
@@ -360,7 +376,10 @@ import {
   });
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible' || !state.open) return;
-    if (listIsOld()) loadDeals(); else if (stockIsDue()) loadStock();
+    const now = Date.now();
+    const listDue = state.error ? !state.blocked && !state.siteChanged && now >= nextErrorRetry : listIsOld();
+    const stockDue = state.stockError ? !state.stockBlocked && now >= nextStockRetry : stockIsDue();
+    if (listDue) loadDeals(); else if (stockDue) loadStock({ onlyMissing: gapsOnly() });
   });
   // Left open on screen (no tab switch to trigger the above): keep "Updated …" honest and refresh
   // on the same rule. Errors wait for Retry / reconnect so a failing site isn't hammered.
@@ -391,6 +410,11 @@ import {
 
   function toast(text) {
     const t = ref('toast'); t.textContent = text; t.hidden = false;
+    if (state.sheet) {
+      const live = ref('sheetLive');
+      live.textContent = '';
+      requestAnimationFrame(() => { live.textContent = text; }); // re-announced even when repeated
+    }
     clearTimeout(toast.t); toast.t = setTimeout(() => { t.hidden = true; }, 2600);
   }
 
@@ -719,7 +743,7 @@ import {
         const fromPanel = !!el.closest('[data-ref="status"]');
         const fromBanner = !!el.closest('[data-ref="banner"]');
         await loadDeals();
-        if (!state.error && state.items.length) toast('Deals updated');
+        if (!state.error && state.items.length) toast(state.partialNote ? 'Deals partly updated — see the note above' : 'Deals updated');
         // Still nothing: stay on Try again so another Enter tries again.
         else if (state.error) {
           // With a list on screen the banner says it; with none, say it here.

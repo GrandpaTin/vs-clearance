@@ -98,7 +98,7 @@ async function load({ manual = false } = {}) {
     if (fromCache && state.snapshot) {
       // The worker turns a failed check into its saved copy: same grace as a failed fetch (one blip
       // on flaky mobile data isn't news; two in a row are). Offline shows at once.
-      if (!manual && !wasLoading && cached !== 'offline' && ++quietFailures < 2) { changed = false; return; }
+      if (!manual && !wasLoading && cached !== 'offline' && before !== 'offline' && ++quietFailures < 2) { changed = false; return; }
       state.error = cached; changed = false;
       const said = { offline: ['Still offline', 'You’re offline'], slow: ['Connection is still slow', 'Connection is slow'], failed: ['Still couldn’t check for updates', 'Couldn’t check for updates'] }[cached];
       if (manual) toast(before === cached ? said[0] : said[1]);
@@ -129,7 +129,7 @@ async function load({ manual = false } = {}) {
     if (abort.superseded) { changed = false; return; } // a newer attempt took over
     if (e && e.unreadable) state.etag = null;
     const failure = navigator.onLine === false ? 'offline' : e && e.unreadable ? 'bad' : e && e.status >= 500 ? 'server' : 'failed';
-    if (!manual && !wasLoading && state.snapshot && failure !== 'offline' && ++quietFailures < 2) {
+    if (!manual && !wasLoading && state.snapshot && failure !== 'offline' && before !== 'offline' && ++quietFailures < 2) {
       changed = false;
       return; // flaky mobile data: wait for the next check before warning
     }
@@ -167,7 +167,7 @@ function acceptSnapshot(snap) {
   else {
     snap.store.id = String(snap.store.id);
     const name = typeof snap.store.name === 'string' && snap.store.name.trim();
-    snap.store.name = name || storeAddress(snap.store) || 'your store';
+    snap.store.name = name || storeAddress(snap.store) || 'the shared store';
   }
   if (snap.stockStoreId != null) snap.stockStoreId = String(snap.stockStoreId);
   const stock = snap.stockStoreId && snap.store && snap.stockStoreId === snap.store.id ? snap.stock : null;
@@ -346,7 +346,7 @@ function renderBody() {
     status.innerHTML = state.error === 'stalled'
       ? statusHtml('⏳', 'Still loading deals…', 'Your connection is slow; the deals will appear here as soon as they arrive.', [['Try again', 'retry', false]])
       : state.error === 'empty'
-      ? statusHtml('🏷️', 'No deals shared yet', 'The person who sent this link hasn’t shared a list yet. You can still get VS Clearance for your own phone or computer — it’s free.', [['Get the app', 'get', true]])
+      ? statusHtml('🏷️', 'No deals shared yet', 'The person who sent this link hasn’t shared a list yet. You can still get VS Clearance for your own phone or computer — it’s free.', [['Get the app', 'get', true], ['Check again', 'retry', false]])
       : statusHtml('⚠️', 'Couldn’t load deals', state.error === 'offline' || navigator.onLine === false
         ? 'You seem to be offline. Check your connection and try again.'
         : state.error === 'bad' ? 'The shared list couldn’t be read. Try again in a minute.'

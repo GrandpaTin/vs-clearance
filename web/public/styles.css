@@ -169,6 +169,7 @@ main { max-width: 900px; margin: 0 auto; padding: 0 0 16px; }
 .brand { font-size: .75rem; letter-spacing: .06em; font-weight: 800; color: var(--navy); text-transform: uppercase; }
 @media (prefers-color-scheme: dark) { .brand { color: var(--sky); } }
 .title {
+  overflow-wrap: anywhere;
   font-weight: 600; margin: 0; padding-right: 8px; color: var(--text); text-decoration: none;
   display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
 }

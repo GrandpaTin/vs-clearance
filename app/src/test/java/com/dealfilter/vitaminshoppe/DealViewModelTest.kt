@@ -234,4 +234,22 @@ class DealViewModelTest {
         assertFalse(s.needsVerification)
         assertEquals(RefreshNotice.Kind.OFFLINE, refreshNotice(s, System.currentTimeMillis())!!.kind)
     }
+    @Test
+    fun `tapping Retry during a quiet offline retry shows that it is refreshing`() {
+        saveList(ageMillis = 7 * 24 * 3600_000L)
+        app.fake = fakeSite { calls.incrementAndGet(); throw FetchException.Offline() }
+        val vm = DealViewModel(app)
+        vm.onAppForeground()
+        vm.awaitState { it.loadErrorIsOffline }
+        // Back on a slow network: the automatic retry runs quietly behind the offline banner...
+        app.fake = fakeSite { calls.incrementAndGet(); kotlinx.coroutines.delay(3_000); listing }
+        vm.onAppBackground()
+        vm.onAppForeground()
+        Thread.sleep(300)
+        shadowOf(Looper.getMainLooper()).idle()
+        // ...and the user's tap makes it visible instead of doing nothing.
+        vm.refresh()
+        val s = vm.awaitState { it.status == LoadStatus.REFRESHING || it.status == LoadStatus.LOADING }
+        assertTrue("refreshing is shown", s.status == LoadStatus.REFRESHING || s.status == LoadStatus.LOADING)
+    }
 }

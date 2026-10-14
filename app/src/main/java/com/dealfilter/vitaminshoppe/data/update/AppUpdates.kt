@@ -93,6 +93,11 @@ open class AppUpdater(
         if (release != null) scope.launch {
             val ready = withContext(Dispatchers.IO) { apkFile.exists() && verifyMatchesInstalledApp(apkFile, release, exact = true) == null }
             if (ready) _state.update { if (it.available?.versionCode == release.versionCode) it.copy(readyToInstall = true) else it }
+            // Restarted after granting "install unknown apps": open the installer as promised.
+            if (ready && prefs.getBoolean(K_INSTALL_AFTER_GRANT, false)) {
+                installWhenSeen = true
+                withContext(Dispatchers.Main) { onReturnedToApp() }
+            }
         }
     }
     val state: StateFlow<UpdateState> = _state.asStateFlow()
@@ -145,7 +150,7 @@ open class AppUpdater(
 
     /** "Later": hide this version's banner until a newer one or a manual check. */
     fun dismiss() {
-        _state.value.available?.let { prefs.edit().putInt(K_DISMISSED, it.versionCode).apply() }
+        _state.value.available?.let { prefs.edit().putInt(K_DISMISSED, it.versionCode).remove(K_INSTALL_AFTER_GRANT).apply() }
         _state.update { it.copy(isDialogOpen = false, dismissed = true, error = null) }
     }
 
@@ -190,6 +195,8 @@ open class AppUpdater(
             return
         }
         if (!canInstall()) {
+            // Granting the permission can restart the app: remember to carry on afterwards.
+            prefs.edit().putBoolean(K_INSTALL_AFTER_GRANT, true).apply()
             _state.update { it.copy(needsInstallPermission = true) }
             return
         }
@@ -205,6 +212,7 @@ open class AppUpdater(
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
         try {
             context.startActivity(intent)
+            prefs.edit().remove(K_INSTALL_AFTER_GRANT).apply()
             _state.update { it.copy(needsInstallPermission = false, error = null) }
         } catch (e: Exception) {
             _state.update { it.copy(error = "Android couldn't open its installer. Get the update from the download page instead.", needsManualInstall = true) }
@@ -342,6 +350,7 @@ open class AppUpdater(
         private const val K_CHECKED = "checked"
         private const val K_DISMISSED = "dismissed"
         private const val K_RELEASE = "release"
+        private const val K_INSTALL_AFTER_GRANT = "install_after_grant"
         private const val DAY_MS = 24 * 3600_000L
 
         private val VERSION_CODE = Regex("""versionCode:\s*(\d+)""")

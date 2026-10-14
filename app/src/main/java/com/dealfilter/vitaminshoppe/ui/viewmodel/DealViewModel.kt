@@ -82,6 +82,9 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
 
     /** The user asked to refresh while a background refresh was running. */
     private var userWaiting = false
+
+    /** The user's own "Check for updates" (one at a time). */
+    private var manualUpdateCheck: Job? = null
     private var lastFailureAt = 0L
 
     /** The last refresh's list looked broken (far too short) and was kept out; the user can insist. */
@@ -278,7 +281,13 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
     override fun refresh() {
         // A background refresh is already running: if it ends needing the site's check, run the user's own
         // refresh right after so the real check is shown (a quiet run never shows it).
-        if (loadJob?.isActive == true) userWaiting = true
+        if (loadJob?.isActive == true) {
+            userWaiting = true
+            // A quiet retry was running behind an unchanged banner: show it, so the tap visibly does something.
+            if (_uiState.value.status == LoadStatus.IDLE) _uiState.update {
+                it.copy(status = if (it.hasData) LoadStatus.REFRESHING else LoadStatus.LOADING, loadError = null, loadErrorIsOffline = false, needsVerification = false)
+            }
+        }
         autoFailures = 0
         stockFailures = 0
         autoRetryJob?.cancel()
@@ -719,7 +728,6 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
     }
 
     override fun clearStore() {
-        val checkWasRunning = stockJob?.isActive == true
         stockJob?.cancel()
         stockRetryJob?.cancel()
         stockFailures = 0
@@ -736,7 +744,8 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
             ).withDerived()
         }
         savePreferences()
-        if (checkWasRunning) shareIfOn()
+        // Friends' copy shouldn't keep showing the old store's shelf counts (an unchanged list isn't re-sent).
+        shareIfOn()
     }
 
     // -------------------------------------------------------------------------------------------
@@ -818,9 +827,10 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
     // -------------------------------------------------------------------------------------------
 
     override fun checkForUpdates() {
-        if (updater.state.value.isChecking) return
+        if (manualUpdateCheck?.isActive == true) return
         showMessage("Checking for updates…")
-        viewModelScope.launch {
+        // (An automatic check may be running; check() waits its turn, so the user still gets an answer.)
+        manualUpdateCheck = viewModelScope.launch {
             val message = updater.check(force = true)
             if (message != null) showMessage(message) else if (updater.state.value.available != null) updater.openDialog()
         }

@@ -25,7 +25,13 @@
       var ok = false;
       try { ok = document.execCommand('copy'); } catch (e) { /* not supported */ }
       t.remove();
-      if (ok) done(); else btn.textContent = url;
+      if (ok) return done();
+      // Nothing can copy here: select the link shown on the page so a long-press copies it.
+      var shown = document.getElementById('share-url');
+      var sel = window.getSelection && window.getSelection();
+      if (shown && sel) { sel.selectAllChildren(shown); shown.scrollIntoView({ block: 'center' }); }
+      btn.textContent = 'Link selected — press and hold to copy';
+      setTimeout(function () { btn.textContent = label; }, 4000);
     }
   });
   // Show download sizes so people know what they're getting.
