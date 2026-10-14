@@ -376,7 +376,7 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
                     viewModelScope.launch { job?.join(); refreshInternal(auto = false) }
                 }
                 lastFailureAt = System.currentTimeMillis()
-                _uiState.update { it.copy(status = LoadStatus.IDLE, loadError = e.message, needsVerification = true) }
+                _uiState.update { it.copy(status = LoadStatus.IDLE, loadError = e.message, loadErrorIsOffline = false, needsVerification = true) }
             } catch (e: FetchException) {
                 userWaiting = false
                 _uiState.update {
@@ -386,7 +386,7 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
                 if (e !is FetchException.Offline) { lastFailureAt = System.currentTimeMillis(); scheduleAutoRetry() }
             } catch (e: Exception) {
                 userWaiting = false
-                _uiState.update { it.copy(status = LoadStatus.IDLE, loadError = "Something went wrong loading deals. Please try again.") }
+                _uiState.update { it.copy(status = LoadStatus.IDLE, loadError = "Something went wrong loading deals. Please try again.", loadErrorIsOffline = false) }
                 lastFailureAt = System.currentTimeMillis()
                 scheduleAutoRetry()
             }

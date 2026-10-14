@@ -36,6 +36,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -80,10 +81,10 @@ fun WebShareSheet(
 ) {
     val context = LocalContext.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    var repo by rememberSaveable { mutableStateOf(share.gitHubRepo.removePrefix("https://")) }
-    var repoToken by rememberSaveable { mutableStateOf(share.gitHubToken) }
-    var server by rememberSaveable { mutableStateOf(share.serverUrl) }
-    var serverToken by rememberSaveable { mutableStateOf(share.serverToken) }
+    var repo by rememberSaveable(share.gitHubRepo) { mutableStateOf(share.gitHubRepo.removePrefix("https://")) }
+    var repoToken by remember(share.gitHubToken) { mutableStateOf(share.gitHubToken) }
+    var server by rememberSaveable(share.serverUrl) { mutableStateOf(share.serverUrl) }
+    var serverToken by remember(share.serverToken) { mutableStateOf(share.serverToken) }
     var showServer by rememberSaveable { mutableStateOf(share.serverUrl.isNotBlank() && !share.hasGitHub) }
     val dirty = WebPublisher.normalizeUrl(repo) != share.gitHubRepo || repoToken.trim() != share.gitHubToken ||
         WebPublisher.normalizeUrl(server) != share.serverUrl || serverToken.trim() != share.serverToken

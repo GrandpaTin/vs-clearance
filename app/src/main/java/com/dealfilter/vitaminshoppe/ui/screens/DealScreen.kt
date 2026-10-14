@@ -278,7 +278,7 @@ fun DealScreenContent(state: DealUiState, viewModel: DealActions, modifier: Modi
                                 tint = Color.White
                             )
                         }
-                        IconButton(onClick = viewModel::refresh, enabled = state.status != LoadStatus.LOADING) {
+                        IconButton(onClick = viewModel::refresh) {
                             if (state.status == LoadStatus.IDLE) {
                                 Icon(Icons.Default.Refresh, contentDescription = "Refresh deals", tint = Color.White)
                             } else {
@@ -596,11 +596,12 @@ private fun HeaderSubtitle(state: DealUiState, compact: Boolean) {
     // At large font sizes the bar has room for one short line only ("4 min ago").
     val updated = state.lastUpdatedMillis?.let { ago(it, now) }
         ?.let { if (compact) it.replace(" minutes", " min").replace(" minute", " min").replace(" hours", " hr").replace(" hour", " hr") else it }
+    val changed = changedInMode(state)
     val text = when {
         state.status == LoadStatus.LOADING -> "Loading live prices…"
         state.status == LoadStatus.REFRESHING -> "Refreshing…"
         state.isShowingSavedData && updated != null -> "Saved $updated"
-        updated != null && changedInMode(state) > 0 -> "Updated $updated · ${changedInMode(state)} new or cheaper"
+        updated != null && changed > 0 -> "Updated $updated · $changed new or cheaper"
         updated != null -> "Updated $updated"
         else -> "Live from vitaminshoppe.com"
     }
@@ -650,7 +651,6 @@ private fun SearchField(placeholder: String, query: String, onQueryChange: (Stri
         modifier = Modifier
             .fillMaxWidth()
             .padding(start = 12.dp, end = 12.dp, bottom = 10.dp)
-            .semantics { contentDescription = "Search deals" }
     )
 }
 

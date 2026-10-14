@@ -60,7 +60,7 @@ import {
   const state = {
     open: false,
     raw: cache?.items || [],
-    savedAt: cache?.savedAt || null,
+    savedAt: Number.isFinite(cache?.savedAt) ? cache.savedAt : null,
     items: [],
     store: get('store', null),
     stock: get('stock', null), // { storeId, at, map }
@@ -90,7 +90,13 @@ import {
   }
   function restoreMarks() {
     const m = get('marks', null);
-    if (m) state.changes = prune({ newIds: new Set(m.newIds), drops: new Map(Object.entries(m.drops)) }, state.items);
+    if (!m) return;
+    try {
+      if (!Array.isArray(m.newIds) || !m.drops || typeof m.drops !== 'object' || Array.isArray(m.drops)) throw new Error('bad marks');
+      state.changes = prune({ newIds: new Set(m.newIds), drops: new Map(Object.entries(m.drops)) }, state.items);
+    } catch {
+      put('marks', null); // cosmetic: drop the marks, keep the list
+    }
   }
   // Saved store / stock that don't have the expected shape are forgotten rather than trusted.
   const plain = (o) => !!o && typeof o === 'object' && !Array.isArray(o);
@@ -177,10 +183,11 @@ import {
   /** One shelf check per store at a time; a second request waits for (and shares) the one running. */
   function loadStock(opts) {
     const id = state.store ? state.store.id : null;
-    if (loadStock.p && loadStock.storeId === id) return loadStock.p;
+    if (loadStock.p && loadStock.storeId === id && loadStock.run === stockRun) return loadStock.p;
     loadStock.storeId = id;
     const p = loadStockNow(opts).finally(() => { if (loadStock.p === p) loadStock.p = null; });
     loadStock.p = p;
+    loadStock.run = stockRun; // (loadStockNow takes its run number synchronously)
     return p;
   }
   async function loadStockNow({ onlyMissing = false } = {}) {
@@ -233,7 +240,8 @@ import {
         // the title already says "Quick check needed"; the body says what for and what to do
         state.stockError = state.stockBlocked
           ? `Vitamin Shoppe wants to confirm a person is browsing before showing stock at ${store.name}. Reload the page, complete any check, and Deals reopens.`
-          : (keep ? `Couldn't check the ${missing} new item${missing === 1 ? '' : 's'} at ${store.name}. `
+          : (keep && !keep.partial ? `Couldn't check the ${missing} new item${missing === 1 ? '' : 's'} at ${store.name}. `
+            : keep ? `Couldn't check ${missing} of ${state.raw.filter((o) => o.jda).length} items at ${store.name}. `
             : reached ? `Couldn't check ${missing} of ${total} items at ${store.name}. ` : `Couldn't ${prev ? 're-check' : 'check'} shelf stock at ${store.name}. `) +
             `${e.message.replace(/\.?$/, '.')}`;
         state.stockAdvice = connection ? 'Check your connection and try again.' : 'Retry, or it will try again later.';
@@ -358,12 +366,15 @@ import {
   const launcher = root.querySelector('.launcher');
 
   let reopenAfterCheck = false;
+  /** The page's own overflow style before Deals locked scrolling (restored on close). */
+  let pageOverflow = '';
   function openApp() {
     // Stepped aside for the site's check: open once it's done instead of locking the page underneath.
     if (!host.isConnected) { reopenAfterCheck = true; return; }
     state.open = true; app.hidden = false; launcher.hidden = true;
     // So Back from a product page lands in Deals again (the site's own history state is kept).
     if (location.hash !== '#vsdeals') history.replaceState(history.state, '', location.pathname + location.search + '#vsdeals');
+    if (document.documentElement.style.overflow !== 'hidden') pageOverflow = document.documentElement.style.overflow;
     document.documentElement.style.overflow = 'hidden';
     render();
     // A refusal from before (the user may just have completed the site's check) is retried on open.
@@ -382,7 +393,10 @@ import {
   /** Fresh stock with gaps: ask only for what's missing. */
   function gapsOnly() { return hasStock() && stockHasGaps() && Date.now() - (state.stock.at || 0) < 6 * 3600e3; }
   // One rule everywhere: a list older than 10 minutes refreshes on open, on reconnect and on return.
-  function listIsOld() { return !state.savedAt || Date.now() - state.savedAt > 10 * 60_000; }
+  function listIsOld() {
+    const age = Date.now() - (state.savedAt || 0);
+    return !state.savedAt || age > 10 * 60_000 || age < -5 * 60_000; // far in the future: the clock moved
+  }
   window.addEventListener('online', () => {
     if (!state.open) return;
     if (state.error || listIsOld()) loadDeals(); else if (state.stockError || stockIsDue()) loadStock();
@@ -416,7 +430,7 @@ import {
 
   function closeApp() {
     state.open = false; app.hidden = true; launcher.hidden = !get('launcher', true);
-    document.documentElement.style.overflow = '';
+    document.documentElement.style.overflow = pageOverflow;
     if (!launcher.hidden) launcher.focus({ preventScroll: true });
     if (location.hash === '#vsdeals') history.replaceState(history.state, '', location.pathname + location.search);
   }
@@ -921,11 +935,11 @@ import {
       if (!/^https:\/\//.test(json.url) || typeof json.token !== 'string' || json.token.length < 16) throw new Error('bad');
       state.share = { url: json.url, token: json.token };
       put('share', state.share);
-      history.replaceState(null, '', location.pathname + location.search);
+      history.replaceState(history.state, '', location.pathname + location.search);
       setTimeout(() => toast('Sharing turned on — your list will appear on your link'), 400);
       return 'ok';
     } catch {
-      history.replaceState(null, '', location.pathname + location.search); // never leave a token in the address bar
+      history.replaceState(history.state, '', location.pathname + location.search); // never leave a token in the address bar
       setTimeout(() => toast('That sharing link is incomplete — open it again from your VS Clearance setup page.'), 400);
     }
     return 'invalid';
@@ -951,7 +965,7 @@ import {
       reopenAfterCheck = reopenAfterCheck || state.open;
       state.open = false; // stops the reconnect / tab-return refreshes too
       host.remove();
-      document.documentElement.style.overflow = '';
+      document.documentElement.style.overflow = pageOverflow;
     } else if (!check && !host.isConnected) {
       attach(pendingPaired);
     }

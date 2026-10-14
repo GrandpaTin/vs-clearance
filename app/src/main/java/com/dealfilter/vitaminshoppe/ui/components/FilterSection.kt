@@ -218,7 +218,7 @@ fun CategoryChips(
 ) {
     if (categories.isEmpty() && changeCount == 0) return
     // Keep a selected category visible even if it isn't in today's top list.
-    val shown = if (selected != null && selected !in categories) listOf(selected) + categories else categories
+    val shown = if (selected != null && categories.none { it.equals(selected, true) }) listOf(selected) + categories else categories
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -242,7 +242,7 @@ fun CategoryChips(
         }
         shown.forEach { category ->
             FilterChip(
-                selected = selected == category,
+                selected = selected.equals(category, true),
                 onClick = { onToggle(category) },
                 label = { Text(category, maxLines = 1) },
                 leadingIcon = if (selected == category) {

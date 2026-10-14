@@ -70,11 +70,11 @@ export const perServing = (d) => (d.servings ? bestPrice(d) / d.servings : null)
 // Only a deal when it beats what you'd pay anyway, the in-cart price included.
 export const autoDeliveryDeal = (d) => (d.adp && d.adp < bestPrice(d) - 0.005 ? d.adp : null);
 
-export const money = (v) => '$' + v.toFixed(2);
+export const money = (v) => v.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
 export function perServingLabel(d) {
   const p = perServing(d);
   if (p == null) return null;
-  return p < 1 ? `${Math.round(p * 100)}¢/serving` : `${money(p)}/serving`;
+  return p < 0.005 ? '<1¢/serving' : p < 1 ? `${Math.round(p * 100)}¢/serving` : `${money(p)}/serving`;
 }
 
 export function sizeLabel(title) {

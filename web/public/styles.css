@@ -183,7 +183,7 @@ main { max-width: 900px; margin: 0 auto; padding: 0 0 16px; }
 .note { font-size: .85rem; color: var(--muted); }
 .note.cart::before { content: "🛒 "; }
 .pills { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding-right: 8px; }
-.pill { background: var(--surface-2); color: var(--muted); font-size: .8rem; font-weight: 500; border-radius: 6px; padding: 2px 6px; }
+.pill { max-width: 100%; overflow-wrap: anywhere; background: var(--surface-2); color: var(--muted); font-size: .8rem; font-weight: 500; border-radius: 6px; padding: 2px 6px; }
 .rating { font-size: .85rem; color: var(--muted); }
 .foot { display: flex; align-items: center; min-height: 44px; }
 .stock { flex: 1; display: flex; align-items: flex-start; gap: 6px; font-size: .9rem; font-weight: 500; }

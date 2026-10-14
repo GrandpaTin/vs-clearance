@@ -174,6 +174,7 @@ function acceptSnapshot(snap) {
   // One malformed row (no id, link or price) is skipped rather than taking the whole list down,
   // and a repeated id keeps its first row (shares, marks and cards are keyed by id).
   const ids = new Set();
+  snap.rawCount = snap.items.length;
   const items = snap.items.filter(isUsableItem).map((o) => normalizeItem(o, stock))
     .filter((d) => !ids.has(d.id) && ids.add(d.id));
   // "New & price drops" are tracked per viewer: compare with the list this device saw last time.
@@ -483,9 +484,10 @@ function renderControls() {
   // The active category leads, so a returning visitor sees why the list is short.
   const cats = [...(state.category ? [state.category] : []), ...live.filter((c) => c !== state.category)].slice(0, 8);
   const more = live.filter((c) => !cats.includes(c)).sort((a, b) => a.localeCompare(b));
-  const n = changeIds().size;
+  const n = changeIds().size
+    ? applyFilters(state.items, { ...base, minDiscount: state.floor, onlyIds: changeIds(), unsorted: true }).length : 0;
   const catChips = [
-    ...(n ? [`<button class="chip" data-act="changes" aria-pressed="${state.onlyChanges}">✨ New & price drops (${n})</button>`] : []),
+    ...(n || state.onlyChanges ? [`<button class="chip" data-act="changes" aria-pressed="${state.onlyChanges}">✨ New & price drops (${n})</button>`] : []),
     ...cats.map((c) => `<button class="chip" data-act="cat" data-v="${esc(c)}" aria-pressed="${state.category === c}">${esc(c)} <span class="n">${countIn(c)}</span></button>`),
     ...(more.length ? [`<label class="chip more"><span>More categories (${more.length})</span><select id="cat-more" aria-label="More categories">
       <option value="">More categories…</option>${more.map((c) => `<option value="${esc(c)}">${esc(c)} (${countIn(c)})</option>`).join('')}</select></label>`] : [])
@@ -557,6 +559,9 @@ function statusHtml(icon, title, body, actions = []) {
 }
 
 function noMatchesHtml() {
+  if (!state.items.length && state.snapshot && state.snapshot.rawCount > 0) {
+    return statusHtml('⚠️', 'Couldn’t show this list', 'The shared list couldn’t be read. Try again in a minute.', [['Try again', 'retry', true]]);
+  }
   if (!state.items.length) {
     const when = state.snapshot && (state.snapshot.savedAt || state.snapshot.publishedAt);
     return statusHtml('🏷️', 'No deals in this list', when
@@ -611,7 +616,7 @@ document.addEventListener('click', async (e) => {
   }
   const act = el.dataset.act;
   switch (act) {
-    case 'floor': return update(() => { state.floor = Number(el.dataset.v); });
+    case 'floor': return update(() => { const v = Number(el.dataset.v); state.floor = state.floor === v ? 0 : v; });
     case 'instock': return update(() => { state.inStockOnly = !state.inStockOnly; });
     case 'cat': return update(() => { state.category = state.category === el.dataset.v ? null : el.dataset.v; });
     case 'changes': return update(() => { state.onlyChanges = !state.onlyChanges; });
@@ -743,7 +748,7 @@ let promptText = '';
 $('ask-ai').addEventListener('click', () => {
   const deals = visible();
   if (!deals.length) return toast('No deals to review — loosen your filters first.');
-  const s = state.snapshot.store;
+  const s = hasStock() ? state.snapshot.store : null;
   promptText = aiPrompt(deals, deals.length, s, state.mode);
   const shown = Math.min(deals.length, AI_MAX_ITEMS);
   const scope = [state.mode === 'pickup' && s ? `On the shelf at ${s.name}` : hasStock() && 'Ship to home',
@@ -770,7 +775,7 @@ $('copy-prompt').addEventListener('click', async () => {
     $('ai-links').hidden = false;
   } catch {
     btn.textContent = 'Copy prompt';
-    note.textContent = 'Couldn’t copy automatically — the prompt is selected below; copy it from there.';
+    note.textContent = 'Couldn’t copy automatically — the prompt is selected below. Press and hold it, then choose Copy.';
     $('prompt-details').open = true;
     const range = document.createRange();
     range.selectNodeContents($('prompt-text'));

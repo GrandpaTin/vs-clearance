@@ -284,6 +284,8 @@ private fun AvailabilityLine(deal: DealItem, store: StoreLocation?, isStockLoadi
         // Shipping: whether it ships comes first; the shelf is a side note.
         shipMode && deal.isOutOfStockOnline ->
             (if ((deal.storeQuantity ?: 0) > 0) "Out of stock online · ${deal.storeQuantity} at your store" else "Out of stock online") to badges.onRedContainer
+        shipMode ->
+            (if ((deal.storeQuantity ?: 0) > 0) "In stock online · ${deal.storeQuantity} at your store" else "In stock online") to badges.onEmeraldContainer
         store != null && deal.storeQuantity == null && isStockLoading ->
             "Checking shelf…" to MaterialTheme.colorScheme.outline
         // The store is named in the selector above, so lines stay short enough for one row.
