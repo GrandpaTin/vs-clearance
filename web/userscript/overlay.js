@@ -2,7 +2,7 @@
 // same JSON endpoints the site's pages call, with the user's own session. Built into a single
 // userscript by scripts/build-userscript.mjs (core.js functions are in scope there).
 import {
-  SORTS, FLOORS, AI_MAX_ITEMS, normalizeItem, cartEstimate, bestPrice, discount, autoDeliveryDeal, money, facts,
+  SORTS, FLOORS, AI_MAX_ITEMS, normalizeItem, isUsableItem, cartEstimate, bestPrice, discount, autoDeliveryDeal, money, facts,
   applyFilters, topCategories, changes, prune, aiPrompt, storeAddress, relativeTime, clearanceUrl, storeSearchUrl,
   inventoryUrl, parseClearancePage, parseStores, parseInventory, todaysHours, isListingDespiteStatus
 } from '../public/core.js';
@@ -85,7 +85,9 @@ import {
 
   function rebuild() {
     const map = state.store && state.stock?.storeId === state.store.id ? state.stock.map : null;
-    state.items = state.raw.map((o) => normalizeItem(o, map));
+    if (!Array.isArray(state.raw)) state.raw = [];
+    // A malformed row (older save, partial write) is skipped rather than costing the whole list.
+    state.items = state.raw.filter(isUsableItem).map((o) => normalizeItem(o, map));
     if (state.mode === 'pickup' && !map) state.mode = state.store ? state.mode : 'ship';
   }
   function restoreMarks() {
@@ -93,7 +95,9 @@ import {
     if (!m) return;
     try {
       if (!Array.isArray(m.newIds) || !m.drops || typeof m.drops !== 'object' || Array.isArray(m.drops)) throw new Error('bad marks');
-      state.changes = prune({ newIds: new Set(m.newIds), drops: new Map(Object.entries(m.drops)) }, state.items);
+      const newIds = m.newIds.filter((id) => typeof id === 'string');
+      const drops = Object.entries(m.drops).filter(([, v]) => Number.isFinite(Number(v))).map(([k, v]) => [k, Number(v)]);
+      state.changes = prune({ newIds: new Set(newIds), drops: new Map(drops) }, state.items);
     } catch {
       put('marks', null); // cosmetic: drop the marks, keep the list
     }
@@ -113,6 +117,12 @@ import {
   if (!plain(state.store) || state.store.id == null || typeof state.store.name !== 'string' || !state.store.name.trim()) { state.store = null; put('store', null); }
   if (!plain(state.stock) || !plain(state.stock.map) || !Number.isFinite(state.stock.at) || !state.store || state.stock.storeId !== state.store.id) {
     state.stock = null; put('stock', null);
+  } else {
+    const good = Object.entries(state.stock.map).filter(([, n]) => Number.isFinite(n) && n >= 0);
+    if (good.length !== Object.keys(state.stock.map).length) {
+      state.stock = { ...state.stock, map: Object.fromEntries(good), partial: true }; // the dropped ones are re-checked
+      put('stock', state.stock);
+    }
   }
   try {
     rebuild();
@@ -605,7 +615,9 @@ import {
         (state.siteChanged ? `<a class="text-btn" href="${esc(__VSX_HOME__)}vs-clearance.user.js" target="_blank" rel="noopener">Update</a>` : '') +
         '<button class="text-btn" data-act="refresh">Retry</button></div>';
     } else if (state.partialNote) {
-      html = `<div class="banner warn"><span>${esc(state.partialNote)}</span><button class="text-btn" data-act="refresh">Retry</button></div>`;
+      html = `<div class="banner warn"><span>${esc(state.partialNote)}${state.stockError ? ' Shelf stock couldn\'t be checked either.' : ''}</span>` +
+        (state.stockError && !state.stockBlocked ? '<button class="text-btn" data-act="retry-stock">Retry shelves</button>' : '') +
+        '<button class="text-btn" data-act="refresh">Retry</button></div>';
     } else if (state.stockError && state.mode === 'ship') {
       const shipAge = hasStock() && Date.now() - state.stock.at > 10 * 60_000 ? ` · showing stock checked ${quietAge(state.stock.at)}` : '';
       html = `<div class="banner info"><span>Shelf stock at ${esc(state.store?.name || 'your store')} ${state.stockBlocked ? 'needs a quick check' : "couldn't be checked"}${shipAge}.</span><button class="text-btn" data-act="${state.stockBlocked ? 'reload-page' : 'retry-stock'}">${state.stockBlocked ? 'Reload page' : 'Retry'}</button></div>`;
@@ -998,8 +1010,9 @@ import {
     document.body.appendChild(host);
     let after = null;
     try { after = sessionStorage.getItem('vsx.reopen'); if (after === 'app' || after === 'app-paired') sessionStorage.removeItem('vsx.reopen'); } catch { /* private mode */ }
+    if (after === 'app-invalid') { try { sessionStorage.removeItem('vsx.reopen'); } catch { /* private mode */ } setTimeout(() => toast('That sharing link is incomplete — open it again from your VS Clearance setup page.'), 400); }
     if (after === 'app-paired') setTimeout(() => toast('Sharing turned on — your list will appear on your link'), 400);
-    const wantOpen = reopenAfterCheck || !!paired || location.hash === '#vsdeals' || after === 'app' || after === 'app-paired';
+    const wantOpen = reopenAfterCheck || !!paired || location.hash === '#vsdeals' || after === 'app' || after === 'app-paired' || after === 'app-invalid';
     reopenAfterCheck = false; pendingPaired = null;
     if (restored) { if (wantOpen) openApp(); return; }
     restored = true;
@@ -1008,7 +1021,11 @@ import {
     let view = null;
     if (location.hash === '#vsdeals') {
       try { view = JSON.parse(sessionStorage.getItem('vsx.view') || 'null'); sessionStorage.removeItem('vsx.view'); } catch { /* private mode */ }
-      if (view && Date.now() - view.at < 30 * 60_000) { state.query = view.q || ''; ref('q').value = state.query; } else view = null;
+      if (view && typeof view === 'object' && Number.isFinite(view.at) && Date.now() - view.at < 30 * 60_000) {
+        state.query = typeof view.q === 'string' ? view.q : ''; ref('q').value = state.query;
+        if (!Number.isFinite(view.top)) view.top = 0;
+        if (typeof view.card !== 'string') view.card = null;
+      } else view = null;
     }
     if (wantOpen) openApp();
     if (view && state.open) requestAnimationFrame(() => {
@@ -1038,7 +1055,7 @@ import {
     if (onCheckPage()) {
       reopenAfterCheck = !!paired || location.hash === '#vsdeals'; pendingPaired = paired;
       // The check may reload the page when it's done (the hash is gone by then): remember to open.
-      if (reopenAfterCheck) try { sessionStorage.setItem('vsx.reopen', paired === 'ok' ? 'app-paired' : 'app'); } catch { /* private mode */ }
+      if (reopenAfterCheck) try { sessionStorage.setItem('vsx.reopen', paired === 'ok' ? 'app-paired' : paired === 'invalid' ? 'app-invalid' : 'app'); } catch { /* private mode */ }
       return;
     }
     attach(paired);
@@ -1050,7 +1067,7 @@ import {
       const paired = takePairing() === 'ok';
       if (!host.isConnected) {
         pendingPaired = paired ? 'ok' : 'invalid';
-        try { sessionStorage.setItem('vsx.reopen', paired ? 'app-paired' : 'app'); } catch { /* private mode */ }
+        try { sessionStorage.setItem('vsx.reopen', paired ? 'app-paired' : 'app-invalid'); } catch { /* private mode */ }
       }
       openApp();
       if (paired && state.raw.length && !listIsOld()) publish();
