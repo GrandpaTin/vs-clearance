@@ -113,7 +113,8 @@ async function load({ manual = false } = {}) {
       if (/^\s*</.test(raw)) throw Object.assign(new Error('portal'), { portal: true });
       snap = JSON.parse(raw);
       // Rows but none usable: a broken list — keep the good one on screen (and offline) instead.
-      if (hadList && snap && Array.isArray(snap.items) && snap.items.length && !snap.items.some(isUsableItem)) throw new Error('no usable rows');
+      // (state.snapshot: the saved copy may have appeared on screen while this download ran)
+      if ((hadList || state.snapshot) && snap && Array.isArray(snap.items) && snap.items.length && !snap.items.some(isUsableItem)) throw new Error('no usable rows');
       acceptSnapshot(snap);
     } catch (err) {
       if (err && err.portal) throw err;
@@ -197,8 +198,11 @@ function acceptSnapshot(snap) {
   } else if (marks) {
     state.changes = prune({ newIds: new Set(marks.newIds), drops: new Map(Object.entries(marks.drops)) }, items);
   }
-  store.set('marks', { publishedAt: snap.publishedAt, newIds: [...state.changes.newIds], drops: Object.fromEntries(state.changes.drops) });
-  store.set('seen', Object.fromEntries(items.map((d) => [d.id, bestPrice(d)])));
+  // An empty or unreadable list mustn't reset what this device has seen (the next real list would show no changes).
+  if (items.length) {
+    store.set('marks', { publishedAt: snap.publishedAt, newIds: [...state.changes.newIds], drops: Object.fromEntries(state.changes.drops) });
+    store.set('seen', Object.fromEntries(items.map((d) => [d.id, bestPrice(d)])));
+  }
   state.snapshot = snap;
   state.items = items;
   if (state.mode === 'pickup' && !hasStock()) state.mode = 'ship';

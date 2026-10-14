@@ -786,6 +786,8 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
     // -------------------------------------------------------------------------------------------
 
     private fun runPendingAfterVerification() {
+        // A refresh re-checks the shelves when it finishes; running both would ask the site twice.
+        if (afterVerification.containsKey("refresh")) afterVerification.remove("stock")
         val actions = afterVerification.values.toList()
         afterVerification.clear()
         actions.forEach { it() }

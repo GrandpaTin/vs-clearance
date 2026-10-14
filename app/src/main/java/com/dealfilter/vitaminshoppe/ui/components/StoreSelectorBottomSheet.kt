@@ -44,6 +44,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
@@ -143,7 +145,12 @@ fun StoreSelectorBottomSheet(
                             StoreRow(store, isSelected = store.storeId == selectedStore?.storeId, onSelect = onSelect)
                         }
                     }
-                    sheet.isSearching -> Unit
+                    sheet.isSearching -> Text(
+                        "Finding stores near “${sheet.query.trim()}”…",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(vertical = 16.dp).semantics { liveRegion = LiveRegionMode.Polite }
+                    )
                     !sheet.hasSearched -> Text(
                         "Search to see nearby stores, their hours and distance.",
                         style = MaterialTheme.typography.bodyMedium,

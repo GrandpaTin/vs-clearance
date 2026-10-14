@@ -750,7 +750,8 @@ private fun Banners(state: DealUiState, viewModel: DealActions) {
         }
         // In pickup mode with nothing listed, the full-screen state explains this instead.
         val stockError = state.stockError
-        val sameCheck = state.stockNeedsVerification && refresh?.kind == RefreshNotice.Kind.VERIFY
+        val sameCheck = (state.stockNeedsVerification && refresh?.kind == RefreshNotice.Kind.VERIFY) ||
+            (state.stockErrorCause == "You're offline." && refresh?.kind == RefreshNotice.Kind.OFFLINE)
         if (stockError != null && !sameCheck && state.mode == FulfillmentMode.PICKUP && state.visibleDeals.isNotEmpty()) {
             Banner(
                 icon = Icons.Default.Storefront,
