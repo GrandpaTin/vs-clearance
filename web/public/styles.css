@@ -220,10 +220,6 @@ dialog::backdrop { background: rgba(0,0,0,.5); }
 .sheet-head { display: flex; align-items: flex-start; gap: 8px; margin-right: -8px; }
 .sheet-head .icon-btn { margin-top: -10px; color: var(--muted); }
 @media (pointer: coarse) {
-  .chip.more { order: -1; }
-  #floor-chips .chip[aria-pressed="true"]:not([data-v="0"]) { order: -1; }
-  .chip.clear { order: -2; }
-  #cat-chips .chip[aria-pressed="true"] { order: -2; }
   .chips { scroll-snap-type: x proximity; }
   .chip { scroll-snap-align: start; }
 }

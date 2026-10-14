@@ -238,9 +238,9 @@ import {
     if (!s) { el.hidden = true; return; }
     const st = state.shareStatus;
     el.hidden = false;
-    el.innerHTML = `<span>📤 ${st?.error ? esc(st.error) : st?.at ? `Shared to your link ${relativeTime(st.at)}` : 'Sharing to your link'}</span>
-      <a class="text-btn" href="${esc(s.url)}" target="_blank" rel="noopener">Open</a>
-      <button class="text-btn" data-act="stop-share">Stop</button>`;
+    setHtml(el, `<span>📤 ${st?.error ? esc(st.error) : st?.at ? `Shared to your link ${relativeTime(st.at)}` : 'Sharing to your link'}</span>
+      <a class="text-btn" data-key="open-share" href="${esc(s.url)}" target="_blank" rel="noopener">Open</a>
+      <button class="text-btn" data-act="stop-share">Stop</button>`);
   }
 
   const storeSearch = { query: get('storeQuery', ''), results: [], message: null, searching: false };
@@ -381,9 +381,9 @@ import {
 
   function renderFootNote() {
     const hidden = !get('launcher', true);
-    ref('footNote').innerHTML = `<span class="fn">VS Clearance ${esc(__VSX_VERSION__)}</span><span class="fn"><a class="link-btn" href="${esc(__VSX_HOME__)}vs-clearance.user.js" target="_blank" rel="noopener">Update VS Clearance</a></span><span class="fn">` +
+    setHtml(ref('footNote'), `<span class="fn">VS Clearance ${esc(__VSX_VERSION__)}</span><span class="fn"><a class="link-btn" data-key="update" href="${esc(__VSX_HOME__)}vs-clearance.user.js" target="_blank" rel="noopener">Update VS Clearance</a></span><span class="fn">` +
       (hidden ? '<button class="link-btn" data-act="show-launcher">Show the 🏷️ Deals button</button>'
-        : '<button class="link-btn" data-act="hide-launcher">Hide the 🏷️ Deals button</button>') + '</span>';
+        : '<button class="link-btn" data-act="hide-launcher">Hide the 🏷️ Deals button</button>') + '</span>');
   }
 
   const savedPhrase = () => {
@@ -391,23 +391,26 @@ import {
     return ago === 'just now' ? 'showing the list you just loaded' : `showing the list saved ${ago}`;
   };
 
-  /** Only touches the list when its content changed, so a no-change refresh keeps focus and scroll. */
-  function setList(list, html) {
-    if (list._html === html) return;
-    list.innerHTML = html;
-    list._html = html;
+  /** Only touches a region when its content changed, so a no-change render keeps focus and scroll. */
+  function setHtml(el, html) {
+    if (el._html === html) return;
+    el.innerHTML = html;
+    el._html = html;
   }
+  const setList = setHtml;
+  // What identifies a control across re-renders, most specific first.
+  const FOCUS_KEYS = ['act', 'card', 'ref', 'key'];
   function render() {
     const a = root.activeElement;
-    const act = a && a.dataset ? a.dataset.act : null, v = a && a.dataset ? a.dataset.v : undefined;
-    const card = a && a.dataset ? a.dataset.card : undefined;
+    const ds = a && a.dataset ? a.dataset : {};
+    const kind = FOCUS_KEYS.find((k) => ds[k] != null);
+    const id = kind && ds[kind], v = ds.v;
     renderNow();
-    // Rebuilt buttons and links drop keyboard focus: put it back on the same one (or the app) so
-    // Tab doesn't start over or wander onto the page underneath.
-    if ((act || card != null) && state.open && !(root.activeElement && root.activeElement.isConnected)) {
-      const same = act
-        ? (v == null ? null : [...root.querySelectorAll(`[data-act="${act}"]`)].find((el) => el.dataset.v === v)) || root.querySelector(`[data-act="${act}"]`)
-        : [...root.querySelectorAll('[data-card]')].find((el) => el.dataset.card === card);
+    // Rebuilt controls drop keyboard focus: put it back on the same one (or the app) so Tab
+    // doesn't start over or wander onto the page underneath.
+    if (kind && state.open && !(root.activeElement && root.activeElement.isConnected)) {
+      const all = [...root.querySelectorAll(`[data-${kind}]`)].filter((el) => el.dataset[kind] === id);
+      const same = (v == null ? null : all.find((el) => el.dataset.v === v)) || all[0];
       (same && same.offsetParent ? same : app).focus({ preventScroll: true });
     }
   }
@@ -438,10 +441,11 @@ import {
     const deals = visible();
     const total = state.items.length;
     const said = `Showing ${deals.length} of ${total} deals`;
-    if (ref('live').textContent !== said) ref('live').textContent = said;
-    ref('summary').innerHTML = `<span class="count" aria-hidden="true">${deals.length === total ? `${total} deals` : `${deals.length} of ${total}`}</span>
+    clearTimeout(render.say);
+    render.say = setTimeout(() => { if (ref('live').textContent !== said) ref('live').textContent = said; }, 700);
+    setHtml(ref('summary'), `<span class="count" aria-hidden="true">${deals.length === total ? `${total} deals` : `${deals.length} of ${total}`}</span>
       ${deals.length ? `<button class="tonal-btn" data-act="ai">🧠 Ask AI (${Math.min(deals.length, AI_MAX_ITEMS)})</button>` : ''}
-      <label class="sort"><span class="vh">Sort by</span><select data-ref="sort">${SORTS.map((o) => `<option value="${o.id}"${o.id === state.sort ? ' selected' : ''}>⇅ ${esc(o.short)}</option>`).join('')}</select></label>`;
+      <label class="sort"><span class="vh">Sort by</span><select data-ref="sort">${SORTS.map((o) => `<option value="${o.id}"${o.id === state.sort ? ' selected' : ''}>⇅ ${esc(o.short)}</option>`).join('')}</select></label>`);
     if (state.mode === 'pickup' && state.stockLoading && !deals.length) {
       setList(list, ''); status.hidden = false;
       status.innerHTML = statusHtml('🏬', 'Checking shelves…', `Looking up stock at ${esc(state.store.name)}.`);
@@ -479,7 +483,8 @@ import {
     } else if (state.partialNote) {
       html = `<div class="banner warn"><span>${esc(state.partialNote)}</span><button class="text-btn" data-act="refresh">Retry</button></div>`;
     } else if (state.stockError && state.mode === 'ship') {
-      html = `<div class="banner info"><span>Shelf stock at ${esc(state.store?.name || 'your store')} ${state.stockBlocked ? 'needs a quick check' : "couldn't be checked"}.</span><button class="text-btn" data-act="${state.stockBlocked ? 'reload-page' : 'retry-stock'}">${state.stockBlocked ? 'Reload page' : 'Retry'}</button></div>`;
+      const shipAge = hasStock() && Date.now() - state.stock.at > 10 * 60_000 ? ` · showing stock checked ${relativeTime(state.stock.at)}` : '';
+      html = `<div class="banner info"><span>Shelf stock at ${esc(state.store?.name || 'your store')} ${state.stockBlocked ? 'needs a quick check' : "couldn't be checked"}${shipAge}.</span><button class="text-btn" data-act="${state.stockBlocked ? 'reload-page' : 'retry-stock'}">${state.stockBlocked ? 'Reload page' : 'Retry'}</button></div>`;
     } else if (state.stockError && !(state.mode === 'pickup' && (!hasStock() || !visible().length))) {
       // (In pickup with nothing to show, the full-page panel below says it instead.)
       // The age only matters when the counts on screen are from an earlier check.
@@ -537,7 +542,7 @@ import {
       <div class="body">
         <div class="brandline"><span class="brand">${esc(d.brand || 'Vitamin Shoppe')}</span>${isNew ? '<span class="tag new">NEW</span>' : ''}${was != null ? '<span class="tag drop">PRICE DROP</span>' : ''}</div>
         <a class="title" data-card="${esc(d.id)}" href="${esc(d.url)}">${esc(d.title)}</a>
-        <div class="prices"><span class="price">${est != null ? '≈' : ''}${money(bestPrice(d))}</span>${off ? `<span class="vh">was </span><span class="was">${money(d.list)}</span><span class="tag off" aria-label="${off}% off">−${off}%</span>` : ''}</div>
+        <div class="prices"><span class="price"><span class="vh">${est != null ? 'about ' : 'now '}</span><span aria-hidden="true">${est != null ? '≈' : ''}</span>${money(bestPrice(d))}</span>${off ? `<span class="vh">, was </span><span class="was">${money(d.list)}</span><span class="tag off"><span aria-hidden="true">−${off}%</span><span class="vh">, ${off}% off</span></span>` : ''}</div>
         ${was != null ? `<span class="note">Down from <s>${money(was)}</s> since your last check</span>` : ''}
         ${est != null ? `<span class="note">🛒 Extra ${d.cart}% off in cart (lists ${money(d.site)})</span>` : ''}
         ${adp ? `<span class="note">${money(adp)} with Auto Delivery</span>` : ''}
@@ -645,7 +650,7 @@ import {
     switch (el.dataset.act) {
       case 'close': return closeApp();
       case 'refresh': return loadDeals();
-      case 'retry-stock': return loadStock();
+      case 'retry-stock': return loadStock({ onlyMissing: hasStock() && !!state.stock.partial && Date.now() - state.stock.at < 6 * 3600e3 });
       case 'reload-page':
         // Back where they were after the check: the store sheet reopens (and searches) if it was open.
         try { if (state.sheet === 'stores') sessionStorage.setItem('vsx.reopen', 'stores'); } catch { /* private mode */ }
@@ -853,6 +858,9 @@ import {
   }
   mount();
   window.addEventListener('hashchange', () => { if (location.hash === '#vsdeals' && !state.open) openApp(); });
+  window.addEventListener('pageshow', (e) => {
+    if (e.persisted) try { sessionStorage.removeItem('vsx.view'); } catch { /* private mode */ }
+  });
   window.addEventListener('pagehide', () => {
     if (!state.open) return;
     try { sessionStorage.setItem('vsx.view', JSON.stringify({ q: state.query, top: ref('scroll').scrollTop, at: Date.now() })); } catch { /* private mode */ }

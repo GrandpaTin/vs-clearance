@@ -1,5 +1,5 @@
 import {
-  SORTS, FLOORS, AI_MAX_ITEMS, normalizeItem, cartEstimate, bestPrice, discount, autoDeliveryDeal, money,
+  SORTS, FLOORS, AI_MAX_ITEMS, normalizeItem, isUsableItem, cartEstimate, bestPrice, discount, autoDeliveryDeal, money,
   facts, applyFilters, categoryCounts, inCategory, changes, prune, aiPrompt, storeAddress, relativeTime
 } from './core.js';
 
@@ -73,6 +73,8 @@ async function load({ manual = false } = {}) {
     } finally {
       clearTimeout(timer);
     }
+    // A 304 only means "same as the list you have": with none on screen, it's a miss.
+    if (res.status === 304 && !state.snapshot) { state.etag = null; throw new Error('HTTP 304'); }
     if (res.status === 304) {
       state.error = null;
       quietFailures = 0;
@@ -86,27 +88,36 @@ async function load({ manual = false } = {}) {
     }
     if (!res.ok) throw new Error('HTTP ' + res.status);
     // The service worker answers with its saved copy when the network is down.
-    const fromCache = res.headers.get('X-From-Cache') === '1';
-    // The phone may still have bars (a weak in-store signal): only say "offline" when it really is.
-    const cached = navigator.onLine === false ? 'offline' : 'slow';
+    const via = res.headers.get('X-From-Cache');
+    const fromCache = !!via;
+    // The phone may still have bars (a weak in-store signal): only say "offline" when it really is,
+    // and "slow" only when the network was slow rather than unreachable.
+    const cached = navigator.onLine === false ? 'offline' : via === 'error' ? 'failed' : 'slow';
     if (fromCache && state.snapshot) {
       state.error = cached; changed = false;
-      if (manual) toast(before === cached ? (cached === 'offline' ? 'Still offline' : 'Connection is still slow') : (cached === 'offline' ? 'You’re offline' : 'Connection is slow'));
+      const said = { offline: ['Still offline', 'You’re offline'], slow: ['Connection is still slow', 'Connection is slow'], failed: ['Still couldn’t check for updates', 'Couldn’t check for updates'] }[cached];
+      if (manual) toast(before === cached ? said[0] : said[1]);
       return;
     }
-    if (!fromCache) state.etag = res.headers.get('ETag');
     let snap;
-    try { snap = await res.json(); } catch { throw Object.assign(new Error('unreadable'), { unreadable: true }); }
-    acceptSnapshot(snap);
+    try {
+      snap = await res.json();
+      acceptSnapshot(snap);
+    } catch {
+      throw Object.assign(new Error('unreadable'), { unreadable: true });
+    }
+    // Only now: an ETag for a list that couldn't be read would make every retry a "nothing new" 304.
+    if (!fromCache) state.etag = res.headers.get('ETag');
     quietFailures = 0;
     state.error = fromCache ? cached : null;
     const sameList = hadList && previousPublished === snap.publishedAt;
-    if (manual) toast(fromCache ? `${cached === 'offline' ? 'You’re offline' : 'Connection is slow'} · showing the last deals loaded`
+    if (manual) toast(fromCache ? `${{ offline: 'You’re offline', slow: 'Connection is slow', failed: 'Couldn’t check for updates' }[cached]} · showing the last deals loaded`
       : sameList ? (oldList() ? `No newer list yet — this one is from ${relativeTime(snap.savedAt || snap.publishedAt)}` : 'You’re up to date')
       : oldList() ? `Loaded · this list is from ${relativeTime(snap.savedAt || snap.publishedAt)}`
       : hadList ? 'Updated' : 'Deals loaded');
   } catch (e) {
     if (abort.superseded) { changed = false; return; } // a newer attempt took over
+    if (e && e.unreadable) state.etag = null;
     const failure = navigator.onLine === false ? 'offline' : e && e.unreadable ? 'bad' : 'failed';
     if (!manual && !wasLoading && state.snapshot && failure !== 'offline' && ++quietFailures < 2) {
       changed = false;
@@ -128,8 +139,10 @@ async function load({ manual = false } = {}) {
 }
 
 function acceptSnapshot(snap) {
+  if (!snap || !Array.isArray(snap.items)) throw new Error('not a deals list');
   const stock = snap.stockStoreId && snap.store && snap.stockStoreId === snap.store.id ? snap.stock : null;
-  const items = snap.items.map((o) => normalizeItem(o, stock));
+  // One malformed row (no id, link or price) is skipped rather than taking the whole list down.
+  const items = snap.items.filter(isUsableItem).map((o) => normalizeItem(o, stock));
   // "New & price drops" are tracked per viewer: compare with the list this device saw last time.
   const seen = store.get('seen', null);
   const marks = store.get('marks', null);
@@ -208,7 +221,7 @@ function renderHeader() {
   else if (snap) {
     const n = changeIds().size;
     $('subtitle').textContent = `${oldList() ? 'List from' : 'Updated'} ${relativeTime(snap.savedAt || snap.publishedAt)}` + (n ? ` · ${n} new or cheaper` : '');
-  } else $('subtitle').textContent = 'Shared clearance list';
+  } else $('subtitle').textContent = state.error === 'stalled' ? 'Still loading — slow connection…' : 'Shared clearance list';
 
   // banner for stale / failed refresh with data on screen
   // Before there's a list, "browse here" and a search box would promise something that isn't there.
@@ -253,7 +266,9 @@ function renderHeader() {
 
 let cardCache = new Map();
 
+let renderToken = 0;
 function renderBody() {
+  renderToken++; // a newer render cancels cards still being added from the last one
   const snap = state.snapshot;
   const list = $('list');
   const status = $('status');
@@ -304,7 +319,7 @@ function renderBody() {
   // Reuse the card element when its markup is unchanged so images don't reload and flash.
   const next = new Map();
   const tpl = document.createElement('template');
-  const els = deals.map((d) => {
+  const build = (d) => {
     const html = cardHtml(d);
     const old = cardCache.get(d.id);
     if (old && old.html === html) { next.set(d.id, old); return old.el; }
@@ -312,9 +327,28 @@ function renderBody() {
     const el = tpl.content.firstElementChild;
     next.set(d.id, { html, el });
     return el;
-  });
+  };
+  // Building hundreds of new cards at once freezes a phone for a second: show the first screenful
+  // now and add the rest in small steps (cards already built are reused, so later renders are quick).
+  const fresh = deals.filter((d) => !cardCache.has(d.id)).length;
+  const first = fresh > 60 ? 40 : deals.length;
+  const els = deals.slice(0, first).map(build);
+  const prevCache = cardCache;
   cardCache = next;
   list.replaceChildren(...els);
+  if (first < deals.length) {
+    const token = renderToken;
+    const rest = deals.slice(first);
+    const more = () => {
+      if (token !== renderToken) return;
+      const swap = cardCache; cardCache = prevCache; // reuse lookups still read the old cache
+      const chunk = rest.splice(0, 60).map(build);
+      cardCache = swap;
+      list.append(...chunk);
+      if (rest.length) setTimeout(more, 0);
+    };
+    setTimeout(more, 0);
+  }
 }
 
 function renderControls() {
@@ -351,6 +385,12 @@ function renderControls() {
     prev = n;
     chips.push(`<button class="chip" data-act="floor" data-v="${f}" aria-pressed="${state.floor === f}">${f ? f + '%+ off' : 'Any discount'} <span class="n">${n}</span></button>`);
   }
+  // On touch screens the row scrolls sideways: what's active (and Clear) leads so it's in view.
+  const coarse = matchMedia('(pointer: coarse)').matches;
+  if (coarse) {
+    const pri = (h) => h.includes('chip clear') ? 0 : /data-act="floor" data-v="[1-9]\d*" aria-pressed="true"/.test(h) ? 1 : 2;
+    chips.sort((a, b) => pri(a) - pri(b));
+  }
   const row = $('floor-chips');
   row.innerHTML = chips.join('');
   if (hasClear && !renderControls.hadClear) row.scrollLeft = 0;
@@ -369,11 +409,17 @@ function renderControls() {
   const cats = [...(state.category ? [state.category] : []), ...live.filter((c) => c !== state.category)].slice(0, 8);
   const more = live.filter((c) => !cats.includes(c)).sort((a, b) => a.localeCompare(b));
   const n = changeIds().size;
-  $('cat-chips').innerHTML =
-    (n ? `<button class="chip" data-act="changes" aria-pressed="${state.onlyChanges}">✨ New & price drops (${n})</button>` : '') +
-    cats.map((c) => `<button class="chip" data-act="cat" data-v="${esc(c)}" aria-pressed="${state.category === c}">${esc(c)} <span class="n">${countIn(c)}</span></button>`).join('') +
-    (more.length ? `<label class="chip more"><span>More categories (${more.length})</span><select id="cat-more" aria-label="More categories">
-      <option value="">More categories…</option>${more.map((c) => `<option value="${esc(c)}">${esc(c)} (${countIn(c)})</option>`).join('')}</select></label>` : '');
+  const catChips = [
+    ...(n ? [`<button class="chip" data-act="changes" aria-pressed="${state.onlyChanges}">✨ New & price drops (${n})</button>`] : []),
+    ...cats.map((c) => `<button class="chip" data-act="cat" data-v="${esc(c)}" aria-pressed="${state.category === c}">${esc(c)} <span class="n">${countIn(c)}</span></button>`),
+    ...(more.length ? [`<label class="chip more"><span>More categories (${more.length})</span><select id="cat-more" aria-label="More categories">
+      <option value="">More categories…</option>${more.map((c) => `<option value="${esc(c)}">${esc(c)} (${countIn(c)})</option>`).join('')}</select></label>`] : [])
+  ];
+  if (coarse) {
+    const pri = (h) => /data-act="cat"[^>]*aria-pressed="true"/.test(h) ? 0 : h.includes('chip more') ? 1 : 2;
+    catChips.sort((a, b) => pri(a) - pri(b));
+  }
+  $('cat-chips').innerHTML = catChips.join('');
 
   const sel = $('sort');
   if (!sel.options.length) sel.innerHTML = SORTS.map((o) => `<option value="${o.id}">${esc(o.short)}</option>`).join('');

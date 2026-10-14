@@ -16,14 +16,20 @@ const cents = (p) => Math.round(p * 100);
 const pos = (v) => (typeof v === 'number' && v > 0 ? v : null);
 
 /** Snapshot item (Android LocalStore format, -1 = absent) -> normalized deal. */
+/** A shared row the page can show: an id, a link and a real price. */
+export function isUsableItem(o) {
+  return !!o && typeof o === 'object' && (typeof o.id === 'string' || typeof o.id === 'number') && String(o.id) !== '' &&
+    typeof o.url === 'string' && Number.isFinite(Number(o.site)) && Number(o.site) > 0;
+}
+
 export function normalizeItem(o, stock) {
   const jda = o.jda || null;
   const qty = stock && jda != null ? (jda in stock ? stock[jda] : null) : null;
   return {
-    id: o.id,
+    id: String(o.id),
     jda,
-    brand: (o.brand || '').trim(),
-    title: (o.title || o.id).trim(),
+    brand: String(o.brand || '').trim(),
+    title: String(o.title || o.id).trim(),
     url: o.url,
     img: o.img || null,
     list: Math.max(Number(o.list), Number(o.site)),

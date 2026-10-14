@@ -197,7 +197,10 @@ fun DealScreenContent(state: DealUiState, viewModel: DealActions, modifier: Modi
         // Clear first so a rotation can't show it twice; show from a scope that clearing
         // (which restarts this effect) doesn't cancel.
         viewModel.clearMessage()
-        scope.launch { snackbar.showSnackbar(text) }
+        scope.launch {
+            snackbar.currentSnackbarData?.dismiss()
+            snackbar.showSnackbar(text)
+        }
     }
 
     // Pull-to-refresh <-> view model loading state. The indicator is also shown for automatic
@@ -431,6 +434,7 @@ fun DealScreenContent(state: DealUiState, viewModel: DealActions, modifier: Modi
                             deal = deal,
                             store = state.selectedStore,
                             isStockLoading = state.isStockLoading,
+                            shipMode = state.mode == FulfillmentMode.SHIP,
                             isNew = deal.id in state.changes.newIds,
                             previousPrice = state.changes.priceDrops[deal.id],
                             onOpen = {
@@ -633,7 +637,7 @@ private fun Banners(state: DealUiState, viewModel: DealActions, now: Long) {
         val release = state.update.available
         val downloading = state.update.progress
         val refresh = refreshNotice(state, now)
-        val stockShown = state.stockError != null && !(state.mode == FulfillmentMode.PICKUP && state.visibleDeals.isEmpty())
+        val stockShown = state.stockError != null && state.mode == FulfillmentMode.PICKUP && state.visibleDeals.isNotEmpty()
         val updateWaits = refresh?.kind == RefreshNotice.Kind.STALE || stockShown
         if (release != null && downloading == null && !state.update.isDialogOpen && state.update.error != null && !state.update.dismissed && !updateWaits) {
             Banner(
@@ -739,7 +743,9 @@ private fun Banner(
                 )
                 if (detail != null) Text(detail, style = MaterialTheme.typography.bodySmall, color = content)
             }
-            TextButton(onClick = onAction) { Text(action, color = content, fontWeight = FontWeight.Bold) }
+            TextButton(onClick = onAction, modifier = Modifier.semantics { contentDescription = "$action: $text" }) {
+                Text(action, color = content, fontWeight = FontWeight.Bold)
+            }
         }
     }
 }

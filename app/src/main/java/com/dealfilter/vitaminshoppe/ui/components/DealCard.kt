@@ -61,6 +61,7 @@ fun DealCard(
     store: StoreLocation?,
     isStockLoading: Boolean,
     onOpen: (DealItem) -> Unit,
+    shipMode: Boolean = false,
     isNew: Boolean = false,
     previousPrice: Double? = null,
     onShare: (DealItem) -> Unit,
@@ -220,10 +221,10 @@ fun DealCard(
                 }
 
                 // At large font the stock line needs the full width, so actions drop to the next row.
-                if (largeFont) Box(Modifier.padding(end = 8.dp)) { AvailabilityLine(deal, store, isStockLoading) }
+                if (largeFont) Box(Modifier.padding(end = 8.dp)) { AvailabilityLine(deal, store, isStockLoading, shipMode) }
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.height(40.dp)) {
                     Column(Modifier.weight(1f)) {
-                        if (!largeFont) AvailabilityLine(deal, store, isStockLoading)
+                        if (!largeFont) AvailabilityLine(deal, store, isStockLoading, shipMode)
                     }
                     IconButton(onClick = { onShare(deal) }) {
                         Icon(Icons.Default.Share, contentDescription = "Share ${deal.title}", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
@@ -276,9 +277,12 @@ private fun ProductImage(deal: DealItem, sizeDp: Int) {
 }
 
 @Composable
-private fun AvailabilityLine(deal: DealItem, store: StoreLocation?, isStockLoading: Boolean) {
+private fun AvailabilityLine(deal: DealItem, store: StoreLocation?, isStockLoading: Boolean, shipMode: Boolean) {
     val badges = DealTheme.badges
     val (text, dot) = when {
+        // Shipping: whether it ships comes first; the shelf is a side note.
+        shipMode && deal.isOutOfStockOnline ->
+            (if ((deal.storeQuantity ?: 0) > 0) "Out of stock online · ${deal.storeQuantity} at your store" else "Out of stock online") to badges.onRedContainer
         store != null && deal.storeQuantity == null && isStockLoading ->
             "Checking shelf…" to MaterialTheme.colorScheme.outline
         // The store is named in the selector above, so lines stay short enough for one row.

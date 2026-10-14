@@ -174,4 +174,64 @@ class DealViewModelTest {
         )
         assertEquals(RefreshNotice.Kind.STALE, refreshNotice(s, System.currentTimeMillis())!!.kind)
     }
+
+    /** A saved list of 20+ deals (the fixture's deals three times over, with distinct ids). */
+    private fun saveBigList(ageMillis: Long) {
+        val base = VsApi.dedupe(VsApi.parseClearancePage(listing).items)
+        val items = (0 until 3).flatMap { n -> base.map { it.copy(id = it.id + "-" + n) } }
+        LocalStore(app).saveCache(CachedDeals(items, System.currentTimeMillis() - ageMillis, null, emptyMap()))
+    }
+
+    /** The fixture cut down to [keep] products, with the site reporting [reported] in total. */
+    private fun smallListing(keep: Int, reported: Int): String {
+        val j = org.json.JSONObject(listing)
+        val r = j.getJSONObject("response")
+        val all = r.getJSONArray("products")
+        val few = org.json.JSONArray()
+        for (i in 0 until keep) few.put(all.get(i))
+        r.put("products", few)
+        r.put("numProducts", reported)
+        r.optJSONObject("pagination")?.put("totalPages", 1)
+        return j.toString()
+    }
+
+    @Test
+    fun `a real sell-off with a matching site count replaces the saved list`() {
+        saveBigList(ageMillis = 7 * 24 * 3600_000L)
+        val small = smallListing(keep = 2, reported = 2)
+        app.fake = fakeSite { calls.incrementAndGet(); small }
+        val vm = DealViewModel(app)
+        vm.onAppForeground()
+        val s = vm.awaitState { it.status == LoadStatus.IDLE && !it.isShowingSavedData }
+        assertNull(s.loadError)
+        assertEquals(2, s.allDeals.size)
+    }
+
+    @Test
+    fun `a cut-off list is kept out once and a second refresh by the user takes it`() {
+        saveBigList(ageMillis = 7 * 24 * 3600_000L)
+        val broken = smallListing(keep = 2, reported = 375)
+        app.fake = fakeSite { calls.incrementAndGet(); broken }
+        val vm = DealViewModel(app)
+        vm.onAppForeground()
+        val first = vm.awaitState { it.loadError != null }
+        assertTrue("saved list kept", first.allDeals.size >= 20)
+        vm.refresh()
+        val second = vm.awaitState { it.loadError == null && it.status == LoadStatus.IDLE && it.allDeals.size == 2 }
+        assertEquals(2, second.allDeals.size)
+    }
+
+    @Test
+    fun `after a human check going offline says offline not quick check`() {
+        saveList(ageMillis = 7 * 24 * 3600_000L)
+        app.fake = fakeSite { calls.incrementAndGet(); throw FetchException.VerificationRequired() }
+        val vm = DealViewModel(app)
+        vm.onAppForeground()
+        vm.awaitState { it.needsVerification }
+        app.fake = fakeSite { calls.incrementAndGet(); throw FetchException.Offline() }
+        vm.refresh()
+        val s = vm.awaitState { it.loadErrorIsOffline }
+        assertFalse(s.needsVerification)
+        assertEquals(RefreshNotice.Kind.OFFLINE, refreshNotice(s, System.currentTimeMillis())!!.kind)
+    }
 }

@@ -88,7 +88,13 @@ fun WebShareSheet(
     val canPublish = (repo.isNotBlank() && !repoInvalid && repoToken.isNotBlank()) || (server.isNotBlank() && serverToken.isNotBlank())
     val now = System.currentTimeMillis()
 
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+    ModalBottomSheet(
+        onDismissRequest = {
+            if (dirty && !repoInvalid) onSave(repo, repoToken, server, serverToken, share.enabled || !share.isConfigured)
+            onDismiss()
+        },
+        sheetState = sheetState
+    ) {
         Column(
             verticalArrangement = Arrangement.spacedBy(12.dp),
             modifier = Modifier

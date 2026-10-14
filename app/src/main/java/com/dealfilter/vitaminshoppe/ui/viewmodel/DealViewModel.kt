@@ -81,6 +81,9 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
     private var autoFailures = 0
     private var lastFailureAt = 0L
 
+    /** The last refresh's list looked broken (far too short) and was kept out; the user can insist. */
+    private var rejectedShrink = false
+
     /** Keeps an on-screen list fresh while the app stays open (e.g. propped up in the store). */
     private var freshnessJob: Job? = null
 
@@ -267,15 +270,23 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
                 it.copy(
                     status = if (it.hasData) LoadStatus.REFRESHING else LoadStatus.LOADING,
                     loadError = null,
-                    loadErrorIsOffline = false
+                    loadErrorIsOffline = false,
+                    needsVerification = false
                 )
             }
             try {
                 val fetched = if (auto) withContext(QuietChallenge()) { repository.fetchClearance() } else repository.fetchClearance()
                 val before = _uiState.value.allDeals.size
-                if (before >= 20 && fetched.size < before / 5) {
-                    throw FetchException.BadData("Vitamin Shoppe's list came back nearly empty — keeping your saved deals.")
+                // A list far shorter than the saved one AND than the site's own product count is a broken
+                // answer (changed format, cut-off pages); a real sell-off has a matching count and is kept.
+                // If the count itself is missing (0), a second refresh by the user takes the list anyway.
+                val reported = repository.lastReportedTotal
+                val suspicious = before >= 20 && fetched.size < before / 5 && (reported == 0 || fetched.size < reported * 0.8)
+                if (suspicious && !(auto == false && rejectedShrink)) {
+                    rejectedShrink = true
+                    throw FetchException.BadData("Vitamin Shoppe's list came back nearly empty — keeping your saved deals. Refresh again to load it anyway.")
                 }
+                rejectedShrink = false
                 val now = System.currentTimeMillis()
                 // Show the last known shelf stock right away (new SKUs stay "unknown") so pickup
                 // mode doesn't empty out while the fresh stock check runs.
@@ -600,7 +611,7 @@ class DealViewModel(application: Application) : AndroidViewModel(application), D
             _uiState.update { state ->
                 state.copy(
                     storeSheet = state.storeSheet?.let { s ->
-                        s.copy(results = results ?: s.results, message = message, isSearching = false, hasSearched = true)
+                        s.copy(results = results ?: if (query == lastStoreQuery) s.results else emptyList(), message = message, isSearching = false, hasSearched = true)
                     }
                 )
             }

@@ -28,11 +28,12 @@ self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET' || url.origin !== self.location.origin) return;
   if (url.pathname.endsWith('/api/snapshot')) {
-    const fromCache = () => caches.match('api/snapshot').then((r) => {
+    const fromCache = (reason) => caches.match('api/snapshot').then((r) => {
       if (!r) return null;
-      // Tell the page this is the saved copy so it says "offline" rather than "updated".
+      // Tell the page this is the saved copy, and why ('timeout' = slow, 'error' = unreachable), so it
+      // says "offline" / "slow" / "couldn't check" rather than "updated".
       const headers = new Headers(r.headers);
-      headers.set('X-From-Cache', '1');
+      headers.set('X-From-Cache', reason);
       return r.blob().then((b) => new Response(b, { status: 200, headers }));
     });
     // Abandoned 30 s after the saved copy answered, so polls on a dead connection don't pile up.
@@ -44,10 +45,10 @@ self.addEventListener('fetch', (e) => {
     network.catch(() => {}); // if the saved copy wins, a later network failure is no one's business
     // A request that hangs (weak in-store signal) never fails, so after 8 s answer from the saved
     // copy instead; with nothing saved, keep waiting for the network.
-    const slow = new Promise((resolve) => setTimeout(resolve, 8000)).then(fromCache)
+    const slow = new Promise((resolve) => setTimeout(resolve, 8000)).then(() => fromCache('timeout'))
       .then((r) => { if (r) setTimeout(() => ctrl.abort(), 30000); return r; });
     e.respondWith(Promise.race([network, slow.then((r) => r || network)])
-      .catch(() => fromCache().then((r) => r || Response.error())));
+      .catch(() => fromCache('error').then((r) => r || Response.error())));
     return;
   }
   // Shell: network first so a fix reaches everyone on their next visit; the cache is only the
